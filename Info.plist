@@ -31,7 +31,7 @@
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
     <key>SUFeedURL</key>
-    <string>https://REPLACE_WITH_YOUR_URL/appcast.xml</string>
+    <string>https://nudge-daily.vercel.app/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>lfGw2/NVlX5bt5jquITRWoj1y13uHYs/fu+2McxILuc=</string>
     <key>SUEnableAutomaticChecks</key>
