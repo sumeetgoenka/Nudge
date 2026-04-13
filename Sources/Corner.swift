@@ -1,6 +1,6 @@
 //
 //  Corner.swift
-//  AnayHub
+//  Nudge
 //
 //  Which corner of the active screen the HUD panel is pinned to,
 //  persisted across launches via UserDefaults.
@@ -11,7 +11,7 @@ import Foundation
 enum Corner: String {
     case topLeft, topRight, bottomLeft, bottomRight
 
-    static let storageKey = "AnayHub.corner"
+    static let storageKey = "Nudge.corner"
 
     static var saved: Corner {
         get {

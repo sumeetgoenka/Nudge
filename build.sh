@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# build.sh — Build AnayHub.app from source without Xcode.
+# build.sh — Build Nudge.app from source without Xcode.
 #
 # Usage:
 #   ./build.sh         # build only
@@ -10,14 +10,15 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-APP_NAME="AnayHub"
+APP_NAME="Nudge"
 APP_DIR="build/${APP_NAME}.app"
 CONTENTS="${APP_DIR}/Contents"
 MACOS_DIR="${CONTENTS}/MacOS"
 RES_DIR="${CONTENTS}/Resources"
+FRAMEWORKS_DIR="${CONTENTS}/Frameworks"
 
 rm -rf build
-mkdir -p "${MACOS_DIR}" "${RES_DIR}"
+mkdir -p "${MACOS_DIR}" "${RES_DIR}" "${FRAMEWORKS_DIR}"
 
 echo "→ Compiling Swift sources..."
 SOURCES=(
@@ -34,12 +35,16 @@ SOURCES=(
     Sources/AppDelegate+Instructions.swift
     Sources/AppDelegate+More.swift
     Sources/AppDelegate+Backlog.swift
+    Sources/AppDelegate+Onboarding.swift
     main.swift
 )
 swiftc \
     -O \
     -target arm64-apple-macos12.0 \
     -framework Cocoa \
+    -framework Sparkle \
+    -F Sparkle \
+    -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
     -o "${MACOS_DIR}/${APP_NAME}" \
     "${SOURCES[@]}"
 
@@ -47,12 +52,16 @@ echo "→ Copying Info.plist..."
 cp Info.plist "${CONTENTS}/Info.plist"
 
 echo "→ Copying launchd template..."
-cp com.anayhub.launcher.plist "${RES_DIR}/com.anayhub.launcher.plist"
+cp com.nudge.launcher.plist "${RES_DIR}/com.nudge.launcher.plist"
 
 echo "→ Copying app icon..."
 cp AppIcon.icns "${RES_DIR}/AppIcon.icns"
 
+echo "→ Embedding Sparkle framework..."
+cp -a Sparkle/Sparkle.framework "${FRAMEWORKS_DIR}/"
+
 echo "→ Ad-hoc codesigning..."
+codesign --force --deep --sign - "${FRAMEWORKS_DIR}/Sparkle.framework" 2>/dev/null || true
 codesign --force --deep --sign - "${APP_DIR}" 2>/dev/null || true
 
 echo "✓ Built ${APP_DIR}"

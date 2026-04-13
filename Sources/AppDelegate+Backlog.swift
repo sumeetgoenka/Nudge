@@ -1,6 +1,6 @@
 //
 //  AppDelegate+Backlog.swift
-//  AnayHub
+//  Nudge
 //
 //  The Backlog sidebar view: lists every uncompleted, completable block from
 //  past days. Each row has a "✓ Done" button (marks the item complete and
@@ -14,7 +14,7 @@ import Cocoa
 extension AppDelegate {
 
     func buildBacklogView() -> NSView {
-        let header = NSTextField(labelWithString: "Loose ends, Anay.")
+        let header = NSTextField(labelWithString: "Loose ends, \(userName).")
         header.font = NSFont.systemFont(ofSize: 20, weight: .heavy)
         header.textColor = Theme.primary
 
@@ -38,7 +38,7 @@ extension AppDelegate {
         list.translatesAutoresizingMaskIntoConstraints = false
 
         if backlog.isEmpty {
-            let empty = NSTextField(labelWithString: "🎉 Woohoo — no backlog! Clean slate, Anay.")
+            let empty = NSTextField(labelWithString: "🎉 Woohoo — no backlog! Clean slate, \(userName).")
             empty.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
             empty.textColor = Theme.secondary
             list.addArrangedSubview(empty)

@@ -5,17 +5,17 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>AnayHub</string>
+    <string>Nudge</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
-    <string>com.anayhub.app</string>
+    <string>com.nudge.app</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>AnayHub</string>
+    <string>Nudge</string>
     <key>CFBundleDisplayName</key>
-    <string>AnayHub</string>
+    <string>Nudge</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -30,5 +30,13 @@
     <true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
+    <key>SUFeedURL</key>
+    <string>https://REPLACE_WITH_YOUR_URL/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>lfGw2/NVlX5bt5jquITRWoj1y13uHYs/fu+2McxILuc=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>3600</integer>
 </dict>
 </plist>

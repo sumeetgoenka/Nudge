@@ -1,8 +1,8 @@
 //
 //  Schedule.swift
-//  AnayHub
+//  Nudge
 //
-//  Weekly schedule data mirrored from the AnayHub Next.js project
+//  Weekly schedule data mirrored from the Nudge Next.js project
 //  (src/app/schedule/page.tsx). Each raw entry has a start–end window and
 //  an activity name. Gaps in the day are auto-filled at runtime: gaps
 //  before 21:00 (and after 06:00) become "Break" blocks, anything after

@@ -1,6 +1,6 @@
 //
 //  ProgressStats.swift
-//  AnayHub
+//  Nudge
 //
 //  Pure data computation for the Progress dashboard. Reads from the
 //  caller-supplied done-state snapshot + ScheduleStore so the UI layer

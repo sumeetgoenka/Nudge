@@ -1,6 +1,6 @@
 //
 //  AppDelegate+ScheduleEditor.swift
-//  AnayHub
+//  Nudge
 //
 //  In-app schedule editor accessible from the expanded Schedule view.
 //
@@ -33,6 +33,8 @@ extension AppDelegate {
         // Allow keyboard input into NSTextFields. The panel normally refuses
         // to become key so it doesn't steal focus during HUD use.
         panel.allowsKey = true
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
     }
 
@@ -48,6 +50,7 @@ extension AppDelegate {
         // Drop keyboard focus and revert to normal HUD behavior.
         panel.allowsKey = false
         panel.resignKey()
+        NSApp.setActivationPolicy(.accessory)
         rebuildExpandedMain()
     }
 
@@ -343,9 +346,9 @@ extension AppDelegate {
         row.translatesAutoresizingMaskIntoConstraints = false
         row.heightAnchor.constraint(equalToConstant: 30).isActive = true
 
-        let startField = NSTextField(string: block.startStr)
-        let endField = NSTextField(string: block.endStr)
-        let nameField = NSTextField(string: block.name)
+        let startField = ClickToFocusTextField(string: block.startStr)
+        let endField = ClickToFocusTextField(string: block.endStr)
+        let nameField = ClickToFocusTextField(string: block.name)
         for f in [startField, endField, nameField] {
             f.font = NSFont.systemFont(ofSize: 12)
             f.bezelStyle = .roundedBezel

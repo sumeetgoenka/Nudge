@@ -1,6 +1,6 @@
 //
 //  AppDelegate+Expanded.swift
-//  AnayHub
+//  Nudge
 //
 //  Everything that builds the expanded (sidebar) view:
 //    - expand/collapse animation
@@ -27,12 +27,7 @@ extension AppDelegate {
     func expandPanel() {
         guard !isExpanded else { return }
         isExpanded = true
-        // First-expansion-of-the-day intention prompt.
-        if shouldPromptForDailyIntention() {
-            DispatchQueue.main.async { [weak self] in
-                self?.showDailyIntentionPrompt()
-            }
-        }
+        expandedSection = minimizedViewMode == "todos" ? .todo : .today
         minimizedFrame = panel.frame
         minimizedContentRoot?.isHidden = true
         contentView.isExpanded = true
@@ -49,6 +44,7 @@ extension AppDelegate {
             buildExpandedRoot()
         }
         expandedContentRoot?.isHidden = false
+        contentView.dragHandle = expandedDragStrip
         lastRenderedExpandedBlockIndex = currentBlockIndex
         rebuildExpandedMain()
 
@@ -71,6 +67,8 @@ extension AppDelegate {
         expandedContentRoot?.removeFromSuperview()
         expandedContentRoot = nil
         expandedMainArea = nil
+        expandedDragStrip = nil
+        contentView.dragHandle = dragHandle
         expandedTaglineLabel = nil
         eyeBreakCountdownLabel = nil
         waterCountdownLabel = nil
@@ -86,6 +84,25 @@ extension AppDelegate {
         panel.contentMinSize = NSSize(width: 0, height: 0)
         panel.contentMaxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
                                       height: CGFloat.greatestFiniteMagnitude)
+
+        // If the user changed widget mode while expanded, rebuild the
+        // minimized view so it matches the new mode.
+        let currentMode = minimizedViewMode
+        let builtForSchedule = (minimizedMainStack?.arrangedSubviews.contains(where: { $0 === progressDotsRow }) == true)
+        let needsRebuild = (currentMode == "schedule" && !builtForSchedule) ||
+                           (currentMode == "todos" && builtForSchedule)
+        if needsRebuild {
+            minimizedContentRoot?.removeFromSuperview()
+            minimizedContentRoot = nil
+            minimizedMainStack = nil
+            todosMiniContainer = nil
+            if currentMode == "todos" {
+                layoutTodosMinimized()
+                updateTodosMiniList()
+            } else {
+                layoutScheduleMinimized()
+            }
+        }
 
         minimizedContentRoot?.isHidden = false
 
@@ -130,7 +147,7 @@ extension AppDelegate {
         contentView.addSubview(root)
 
         // Title bar — bigger wordmark + per-section tagline
-        let wordmark = NSTextField(labelWithString: "AnayHub")
+        let wordmark = NSTextField(labelWithString: "Nudge")
         wordmark.font = NSFont.systemFont(ofSize: 18, weight: .heavy)
         wordmark.textColor = Theme.primary
 
@@ -200,6 +217,7 @@ extension AppDelegate {
         let dragStrip = DragHandleView()
         dragStrip.translatesAutoresizingMaskIntoConstraints = false
         dragStrip.onDragEnded = { [weak self] in self?.snapToNearestCorner() }
+        expandedDragStrip = dragStrip
 
         root.addSubview(dragStrip)
         root.addSubview(titleRow)
@@ -215,7 +233,7 @@ extension AppDelegate {
             dragStrip.topAnchor.constraint(equalTo: root.topAnchor),
             dragStrip.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             dragStrip.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            dragStrip.heightAnchor.constraint(equalToConstant: 36),
+            dragStrip.bottomAnchor.constraint(equalTo: root.bottomAnchor),
 
             titleRow.topAnchor.constraint(equalTo: root.topAnchor, constant: 14),
             titleRow.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
@@ -279,7 +297,7 @@ extension AppDelegate {
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         sidebarButtons.removeAll()
-        let items: [(ExpandedSection, String, String)] = [
+        let scheduleFirstItems: [(ExpandedSection, String, String)] = [
             (.today,    "Today",    "sun.max.fill"),
             (.schedule, "Schedule", "calendar"),
             (.week,     "Progress", "chart.bar.fill"),
@@ -287,6 +305,15 @@ extension AppDelegate {
             (.backlog,  "Backlog",  "tray.full.fill"),
             (.more,     "More",     "ellipsis.circle.fill"),
         ]
+        let todosFirstItems: [(ExpandedSection, String, String)] = [
+            (.todo,     "To-Do",    "checklist"),
+            (.today,    "Today",    "sun.max.fill"),
+            (.schedule, "Schedule", "calendar"),
+            (.week,     "Progress", "chart.bar.fill"),
+            (.backlog,  "Backlog",  "tray.full.fill"),
+            (.more,     "More",     "ellipsis.circle.fill"),
+        ]
+        let items = minimizedViewMode == "todos" ? todosFirstItems : scheduleFirstItems
         for (section, label, symbol) in items {
             let btn = SidebarItemButton(title: label, symbolName: symbol)
             btn.target = self
@@ -337,11 +364,11 @@ extension AppDelegate {
 
     func taglineForSection(_ section: ExpandedSection) -> String {
         switch section {
-        case .today:    return "Stay focused, Anay — one block at a time."
-        case .schedule: return "Plan your week, Anay. Own it."
+        case .today:    return "Stay focused, \(userName) — one block at a time."
+        case .schedule: return "Plan your week, \(userName). Own it."
         case .week:     return "Track your wins. Build the streak."
-        case .todo:     return "Capture every loose thread, Anay."
-        case .backlog:  return "Catch up on what slipped through, Anay."
+        case .todo:     return "Capture every loose thread, \(userName)."
+        case .backlog:  return "Catch up on what slipped through, \(userName)."
         case .more:     return "Settings, controls, and the exit."
         }
     }
@@ -350,10 +377,10 @@ extension AppDelegate {
     func greetingForCurrentTime() -> String {
         let h = Calendar.current.component(.hour, from: Date())
         switch h {
-        case 5..<12:  return "Good morning, Anay."
-        case 12..<17: return "Hey Anay — keep going."
-        case 17..<21: return "Good evening, Anay."
-        default:      return "Late night, Anay?"
+        case 5..<12:  return "Good morning, \(userName)."
+        case 12..<17: return "Hey \(userName) — keep going."
+        case 17..<21: return "Good evening, \(userName)."
+        default:      return "Late night, \(userName)?"
         }
     }
 
@@ -424,39 +451,57 @@ extension AppDelegate {
         headerStack.alignment = .leading
         headerStack.spacing = 2
 
-        // Daily intention banner — shown when the user has set one for today.
-        var maybeBanner: NSView? = nil
-        if let intention = intentionForToday() {
-            maybeBanner = makeIntentionBanner(text: intention)
-        }
-
         let list = NSStackView()
         list.orientation = .vertical
         list.alignment = .leading
         list.spacing = 4
         list.translatesAutoresizingMaskIntoConstraints = false
-        for (i, block) in todayBlocks.enumerated() {
-            let row = makeBlockRow(block, indexInToday: i)
-            list.addArrangedSubview(row)
-            row.leadingAnchor.constraint(equalTo: list.leadingAnchor).isActive = true
-            row.trailingAnchor.constraint(equalTo: list.trailingAnchor).isActive = true
+
+        let hasRealBlocks = todayBlocks.contains { $0.name != "Sleep" && $0.name != "Break" }
+        if !hasRealBlocks {
+            let emptyIcon = NSTextField(labelWithString: "📭")
+            emptyIcon.font = NSFont.systemFont(ofSize: 36)
+            emptyIcon.alignment = .center
+            emptyIcon.translatesAutoresizingMaskIntoConstraints = false
+            let emptyMsg = NSTextField(labelWithString: "Nothing added for today.")
+            emptyMsg.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
+            emptyMsg.textColor = Theme.tertiary
+            emptyMsg.alignment = .center
+            emptyMsg.translatesAutoresizingMaskIntoConstraints = false
+            let emptyHint = NSTextField(labelWithString: "Head to Schedule to set up your day.")
+            emptyHint.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+            emptyHint.textColor = Theme.muted
+            emptyHint.alignment = .center
+            emptyHint.translatesAutoresizingMaskIntoConstraints = false
+            let emptyStack = NSStackView(views: [emptyIcon, emptyMsg, emptyHint])
+            emptyStack.orientation = .vertical
+            emptyStack.alignment = .centerX
+            emptyStack.spacing = 6
+            emptyStack.translatesAutoresizingMaskIntoConstraints = false
+            let spacer = NSView()
+            spacer.translatesAutoresizingMaskIntoConstraints = false
+            spacer.heightAnchor.constraint(equalToConstant: 40).isActive = true
+            list.addArrangedSubview(spacer)
+            list.addArrangedSubview(emptyStack)
+            emptyStack.leadingAnchor.constraint(equalTo: list.leadingAnchor).isActive = true
+            emptyStack.trailingAnchor.constraint(equalTo: list.trailingAnchor).isActive = true
+        } else {
+            for (i, block) in todayBlocks.enumerated() {
+                let row = makeBlockRow(block, indexInToday: i)
+                list.addArrangedSubview(row)
+                row.leadingAnchor.constraint(equalTo: list.leadingAnchor).isActive = true
+                row.trailingAnchor.constraint(equalTo: list.trailingAnchor).isActive = true
+            }
         }
 
         let scroll = makeScroll(content: list)
 
-        var stackViews: [NSView] = [headerStack]
-        if let banner = maybeBanner { stackViews.append(banner) }
-        stackViews.append(scroll)
-        let stack = NSStackView(views: stackViews)
+        let stack = NSStackView(views: [headerStack, scroll])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 14
         scroll.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
         scroll.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
-        if let banner = maybeBanner {
-            banner.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
-            banner.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
-        }
         return stack
     }
 
@@ -836,19 +881,19 @@ extension AppDelegate {
         return "\(todos.count) task\(todos.count == 1 ? "" : "s") \u{00b7} capture before they slip"
     }
 
-    private func todosCompletedTodayCount() -> Int {
+    func todosCompletedTodayCount() -> Int {
         let today = todayKey(Date())
-        guard UserDefaults.standard.string(forKey: "AnayHub.todosCompletedDate") == today else { return 0 }
-        return UserDefaults.standard.integer(forKey: "AnayHub.todosCompletedCount")
+        guard UserDefaults.standard.string(forKey: "Nudge.todosCompletedDate") == today else { return 0 }
+        return UserDefaults.standard.integer(forKey: "Nudge.todosCompletedCount")
     }
 
-    private func incrementTodosCompletedToday() {
+    func incrementTodosCompletedToday() {
         let today = todayKey(Date())
-        if UserDefaults.standard.string(forKey: "AnayHub.todosCompletedDate") != today {
-            UserDefaults.standard.set(today, forKey: "AnayHub.todosCompletedDate")
-            UserDefaults.standard.set(1, forKey: "AnayHub.todosCompletedCount")
+        if UserDefaults.standard.string(forKey: "Nudge.todosCompletedDate") != today {
+            UserDefaults.standard.set(today, forKey: "Nudge.todosCompletedDate")
+            UserDefaults.standard.set(1, forKey: "Nudge.todosCompletedCount")
         } else {
-            UserDefaults.standard.set(todosCompletedTodayCount() + 1, forKey: "AnayHub.todosCompletedCount")
+            UserDefaults.standard.set(todosCompletedTodayCount() + 1, forKey: "Nudge.todosCompletedCount")
         }
     }
 
@@ -1279,7 +1324,7 @@ extension AppDelegate {
         icon.font = NSFont.systemFont(ofSize: 36, weight: .ultraLight)
         icon.textColor = done > 0 ? .systemGreen : Theme.dim
         icon.alignment = .center; icon.translatesAutoresizingMaskIntoConstraints = false
-        let msg = NSTextField(labelWithString: done > 0 ? "All clear, Anay." : "No tasks yet.")
+        let msg = NSTextField(labelWithString: done > 0 ? "All clear, \(userName)." : "No tasks yet.")
         msg.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
         msg.textColor = Theme.tertiary
         msg.alignment = .center; msg.translatesAutoresizingMaskIntoConstraints = false

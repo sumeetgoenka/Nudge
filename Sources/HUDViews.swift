@@ -1,6 +1,6 @@
 //
 //  HUDViews.swift
-//  AnayHub
+//  Nudge
 //
 //  Custom NSPanel / NSView / NSButton subclasses used by the HUD:
 //    - HUDPanel:        borderless floating panel above all windows
@@ -144,8 +144,19 @@ final class HUDContentView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? {
         if isExpanded {
             let result = super.hitTest(point)
-            if result is NSTextField || result?.superview is NSTextField {
-                fputs("[AnayHub-HIT] expanded hitTest → \(type(of: result)) \(result?.className ?? "nil")\n", stderr)
+            // If the hit lands on a plain container view (not a control),
+            // fall through to the drag handle so the window is draggable
+            // from any empty area in expanded mode.
+            if let result = result,
+               !(result is NSControl) &&
+               !(result is NSTextView) &&
+               !(result is DragHandleView) &&
+               !(result is NSScrollView) &&
+               !(result is NSClipView) {
+                if let handle = dragHandle {
+                    let p = handle.convert(point, from: self)
+                    if handle.bounds.contains(p) { return handle }
+                }
             }
             return result
         }

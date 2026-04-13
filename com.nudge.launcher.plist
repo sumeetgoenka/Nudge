@@ -1,24 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  AnayHub launchd agent.
+  Nudge launchd agent.
 
-  This file is bundled inside the app at Contents/Resources/com.anayhub.launcher.plist.
-  On first launch, AnayHub copies it to ~/Library/LaunchAgents/com.anayhub.launcher.plist
+  This file is bundled inside the app at Contents/Resources/com.nudge.launcher.plist.
+  On first launch, Nudge copies it to ~/Library/LaunchAgents/com.nudge.launcher.plist
   with {{BINARY_PATH}} replaced by the actual app binary path, then loads it via:
-      launchctl load ~/Library/LaunchAgents/com.anayhub.launcher.plist
+      launchctl load ~/Library/LaunchAgents/com.nudge.launcher.plist
 
   KeepAlive = true ensures launchd relaunches the app immediately if it is force quit
   or crashes.
 
   TO UNINSTALL MANUALLY:
-      launchctl unload ~/Library/LaunchAgents/com.anayhub.launcher.plist
-      rm ~/Library/LaunchAgents/com.anayhub.launcher.plist
+      launchctl unload ~/Library/LaunchAgents/com.nudge.launcher.plist
+      rm ~/Library/LaunchAgents/com.nudge.launcher.plist
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.anayhub.launcher</string>
+    <string>com.nudge.launcher</string>
 
     <key>ProgramArguments</key>
     <array>

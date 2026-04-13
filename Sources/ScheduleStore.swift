@@ -1,9 +1,9 @@
 //
 //  ScheduleStore.swift
-//  AnayHub
+//  Nudge
 //
-//  The single source of truth for AnayHub's schedule data. Persists a
-//  ScheduleDocument to ~/Library/Application Support/AnayHub/schedule.json,
+//  The single source of truth for Nudge's schedule data. Persists a
+//  ScheduleDocument to ~/Library/Application Support/Nudge/schedule.json,
 //  seeded on first launch from the hardcoded WEEKLY_RAW (with gap-fill applied
 //  so the stored schedule is gap-free from day one).
 //
@@ -77,9 +77,9 @@ enum ScheduleValidationError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .dayDoesNotStartAtMidnight:
-            return "Your day must start at 12:00 a.m. Consider adding Sleep or something similar at the very beginning."
+            return "Your day starts at 12:00 a.m. by default. You can add Sleep or a similar block at the beginning, or start your first block whenever you'd like."
         case .dayDoesNotEndAtMidnight:
-            return "Your day must end at 12:00 a.m. Add a final block (e.g., Sleep) so it closes properly."
+            return "Your day ends at 12:00 a.m. by default. You can add a final block (e.g. Sleep) to close it out, or just leave it as-is."
         case .gap(let afterName, let afterEnd, let beforeName, let beforeStart):
             return "There's a gap between \"\(afterName)\" (ends \(afterEnd)) and \"\(beforeName)\" (starts \(beforeStart)). Fill it in or extend a block."
         case .overlap(let first, let second):
@@ -104,7 +104,7 @@ final class ScheduleStore {
     private init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory,
                                                   in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("AnayHub", isDirectory: true)
+        let dir = appSupport.appendingPathComponent("Nudge", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         self.fileURL = dir.appendingPathComponent("schedule.json")
 
@@ -123,8 +123,9 @@ final class ScheduleStore {
                 self.document = doc
             }
         } else {
+            // New user — start with an empty schedule (no hardcoded blocks).
             self.document = ScheduleDocument(
-                weeklyBase: seedWeeklyBaseFromHardcoded(),
+                weeklyBase: [:],
                 dateOverrides: [:],
                 schemaVersion: CURRENT_SCHEDULE_SCHEMA_VERSION)
             try? persist()
@@ -221,25 +222,11 @@ final class ScheduleStore {
         // Sort by start so the user can enter rows in any order.
         parsed.sort { $0.start < $1.start }
 
-        // Day must start at 00:00.
-        guard parsed.first!.start == 0 else {
-            throw ScheduleValidationError.dayDoesNotStartAtMidnight
-        }
-        // Day must end at 24:00.
-        guard parsed.last!.end == 24 * 60 else {
-            throw ScheduleValidationError.dayDoesNotEndAtMidnight
-        }
-        // No gaps, no overlaps between consecutive blocks.
+        // No overlaps between consecutive blocks. Gaps are allowed.
         for i in 0..<(parsed.count - 1) {
             let cur = parsed[i]
             let nxt = parsed[i + 1]
-            if cur.end < nxt.start {
-                throw ScheduleValidationError.gap(
-                    afterName: cur.name,
-                    afterEnd: formatMinutes(cur.end),
-                    beforeName: nxt.name,
-                    beforeStart: formatMinutes(nxt.start))
-            } else if cur.end > nxt.start {
+            if cur.end > nxt.start {
                 throw ScheduleValidationError.overlap(firstName: cur.name,
                                                       secondName: nxt.name)
             }

@@ -1,6 +1,6 @@
 //
 //  main.swift
-//  AnayHub — manual entry point (no @main, no storyboard)
+//  Nudge — manual entry point (no @main, no storyboard)
 //
 
 import Cocoa

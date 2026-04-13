@@ -1,6 +1,6 @@
 //
 //  AppDelegate.swift
-//  AnayHub
+//  Nudge
 //
 //  Main application delegate — owns the HUD panel, timers, schedule state,
 //  and minimized-mode UI. Expanded-mode UI lives in AppDelegate+Expanded.swift.
@@ -8,6 +8,7 @@
 
 import Cocoa
 import UserNotifications
+import Sparkle
 
 /// Tiny shared object that NSButton can target for the mood-picker buttons
 /// in the weekly reflection prompt. NSAlert accessory views can't easily own
@@ -23,6 +24,9 @@ final class MoodPickerHandler: NSObject {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+
+    // MARK: - Sparkle auto-updater
+    var updaterController: SPUStandardUpdaterController!
 
     // MARK: - Window + key views
 
@@ -41,7 +45,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let progressFill     = NSView()
     let markDoneButton     = PillButton()
     let markPrevDoneButton = PillButton()
-    let hideButton         = PillButton()
+    let hideButton         = NSButton(title: "", target: nil, action: nil)
+    let quitButton         = NSButton(title: "", target: nil, action: nil)
     let expandButton       = NSButton(title: "⤢", target: nil, action: nil)
     let nextHeaderLabel    = NSTextField(labelWithString: "NEXT")
     let nextTaskLabel      = NSTextField(labelWithString: "")
@@ -50,6 +55,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let dreamsQuoteLabel   = NSTextField(labelWithString: "")
     var dragHandle: DragHandleView!
     var minimizedMainStack: NSStackView?
+    /// The container for todo-mode minimized rows (rebuilt on each tick).
+    var todosMiniContainer: NSStackView?
+    /// Greeting label used in todos minimized mode.
+    let todosMiniGreeting = NSTextField(labelWithString: "")
+    /// The todo currently being shown in minimized detail view (nil = list mode).
+    var miniDetailTodoId: String? = nil
+    /// Whether the quick-add text field is currently visible in todos minimized mode.
+    var isQuickAddActive: Bool = false
+    /// The quick-add text field shown in the minimized view.
+    var quickAddField: NSTextField?
+    /// "Quick Add To-Do" button in the todos minimized view.
+    let quickAddBtn = NSButton(title: "", target: nil, action: nil)
     /// Cached known-good minimized panel height. Recomputed only when
     /// the panel is actually in minimized mode (never during expand).
     var cachedMinimizedHeight: CGFloat = 0
@@ -64,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var expandedContentRoot: NSView?
     var expandedSection: ExpandedSection = .today
     var expandedMainArea: NSView?
+    var expandedDragStrip: DragHandleView?
     var expandedTaglineLabel: NSTextField?
     var sidebarButtons: [ExpandedSection: NSButton] = [:]
     var lastRenderedExpandedBlockIndex: Int? = nil
@@ -94,8 +112,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// effect material so the panel feels brighter / less moody.
     /// Persisted across launches.
     var lightMoodEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: "AnayHub.lightMood") }
-        set { UserDefaults.standard.set(newValue, forKey: "AnayHub.lightMood") }
+        get { UserDefaults.standard.bool(forKey: "Nudge.lightMood") }
+        set { UserDefaults.standard.set(newValue, forKey: "Nudge.lightMood") }
+    }
+
+    // MARK: - User Settings (onboarding + personalization)
+
+    /// The user's first name, collected during onboarding.
+    var userName: String = ""
+    /// Whether the first-launch onboarding has been completed.
+    var hasCompletedOnboarding: Bool = false
+    /// Which layout to show in the minimized HUD: "schedule" or "todos".
+    var minimizedViewMode: String = "schedule"
+    /// Whether hourly water reminders are active. Off by default.
+    var waterRemindersEnabled: Bool = false
+    /// Whether 20-20-20 eye break reminders are active. Off by default.
+    var eyeBreakEnabled: Bool = false
+    /// When true, the panel doesn't auto-snap to corners after dragging.
+    var snapToCornerDisabled: Bool = false
+
+    func loadUserSettings() {
+        userName = UserDefaults.standard.string(forKey: "Nudge.userName") ?? ""
+        hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "Nudge.hasCompletedOnboarding")
+        minimizedViewMode = UserDefaults.standard.string(forKey: "Nudge.minimizedViewMode") ?? "schedule"
+        waterRemindersEnabled = UserDefaults.standard.bool(forKey: "Nudge.waterRemindersEnabled")
+        eyeBreakEnabled = UserDefaults.standard.bool(forKey: "Nudge.eyeBreakEnabled")
+        snapToCornerDisabled = UserDefaults.standard.bool(forKey: "Nudge.snapToCornerDisabled")
+    }
+    func saveUserName(_ name: String) {
+        userName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        UserDefaults.standard.set(userName, forKey: "Nudge.userName")
+    }
+    func saveMinimizedViewMode(_ mode: String) {
+        minimizedViewMode = mode
+        UserDefaults.standard.set(mode, forKey: "Nudge.minimizedViewMode")
+    }
+    func completeOnboarding() {
+        hasCompletedOnboarding = true
+        UserDefaults.standard.set(true, forKey: "Nudge.hasCompletedOnboarding")
     }
 
     // MARK: - Backlog
@@ -111,11 +165,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     var backlog: [BacklogItem] = []
-    static let backlogKey = "AnayHub.backlog"
+    static let backlogKey = "Nudge.backlog"
     /// Lifetime count of backlog items the user has explicitly marked done.
     var backlogDoneCount: Int {
-        get { UserDefaults.standard.integer(forKey: "AnayHub.backlogDoneCount") }
-        set { UserDefaults.standard.set(newValue, forKey: "AnayHub.backlogDoneCount") }
+        get { UserDefaults.standard.integer(forKey: "Nudge.backlogDoneCount") }
+        set { UserDefaults.standard.set(newValue, forKey: "Nudge.backlogDoneCount") }
     }
 
     func loadBacklog() {
@@ -130,11 +184,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Walk back through dates AnayHub has actually seen running and add
+    /// Walk back through dates Nudge has actually seen running and add
     /// anything completable that wasn't marked done to the backlog.
     /// Idempotent — won't add duplicates. Bounded by:
-    ///   - the earliest day AnayHub has ever recorded as running
-    ///     (UserDefaults "AnayHub.firstRunDate")
+    ///   - the earliest day Nudge has ever recorded as running
+    ///     (UserDefaults "Nudge.firstRunDate")
     ///   - the day before today (we never backlog blocks for today itself,
     ///     since the day hasn't ended yet)
     func sweepBacklogForOverdueDays() {
@@ -142,7 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let today = cal.startOfDay(for: Date())
 
         // Establish / read the first-run anchor.
-        let firstRunKey = "AnayHub.firstRunDate"
+        let firstRunKey = "Nudge.firstRunDate"
         let firstRunDate: Date
         if let stored = UserDefaults.standard.string(forKey: firstRunKey),
            let d = AppDelegate.parseDateKey(stored) {
@@ -150,7 +204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             // First time we've ever swept — anchor to today and exit. We have
             // nothing to backlog because we don't know what days were "missed"
-            // before AnayHub existed on this Mac.
+            // before Nudge existed on this Mac.
             UserDefaults.standard.set(todayKey(today), forKey: firstRunKey)
             // Wipe any pre-existing backlog from before this anchor existed
             // (the previous version of the sweep over-eagerly added 14 days
@@ -179,7 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if backlog.contains(where: { $0.dateKey == dk && $0.blockKey == bk }) {
                     continue
                 }
-                let removedKey = "AnayHub.backlogRemoved.\(dk).\(bk)"
+                let removedKey = "Nudge.backlogRemoved.\(dk).\(bk)"
                 if UserDefaults.standard.bool(forKey: removedKey) {
                     continue
                 }
@@ -208,7 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Soft-delete: also write a "removed" flag so the next sweep
         // doesn't re-add the same item.
         backlog.removeAll { $0 == item }
-        let removedKey = "AnayHub.backlogRemoved.\(item.dateKey).\(item.blockKey)"
+        let removedKey = "Nudge.backlogRemoved.\(item.dateKey).\(item.blockKey)"
         UserDefaults.standard.set(true, forKey: removedKey)
         saveBacklog()
     }
@@ -217,7 +271,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // dateKey ("yyyy-MM-dd") → "the one thing you want to accomplish"
 
     var dailyIntentions: [String: String] = [:]
-    static let dailyIntentionsKey = "AnayHub.dailyIntentions"
+    static let dailyIntentionsKey = "Nudge.dailyIntentions"
 
     func loadDailyIntentions() {
         if let data = UserDefaults.standard.data(forKey: Self.dailyIntentionsKey),
@@ -247,11 +301,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// True if the user has neither set nor explicitly skipped an intention for today.
     func shouldPromptForDailyIntention() -> Bool {
         if intentionForToday() != nil { return false }
-        let dismissedKey = "AnayHub.intentionDismissed.\(todayKey())"
+        let dismissedKey = "Nudge.intentionDismissed.\(todayKey())"
         return !UserDefaults.standard.bool(forKey: dismissedKey)
     }
     func dismissIntentionPromptForToday() {
-        let key = "AnayHub.intentionDismissed.\(todayKey())"
+        let key = "Nudge.intentionDismissed.\(todayKey())"
         UserDefaults.standard.set(true, forKey: key)
     }
 
@@ -263,7 +317,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var note: String
     }
     var weeklyReflections: [String: WeeklyReflection] = [:]
-    static let weeklyReflectionsKey = "AnayHub.weeklyReflections"
+    static let weeklyReflectionsKey = "Nudge.weeklyReflections"
 
     /// Ambient mode — true when the foreground app's window is fullscreen
     /// and we should shrink the HUD to a tiny corner pill.
@@ -303,11 +357,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hour = cal.component(.hour, from: now)
         guard weekday == 1 && hour >= 19 else { return false }
         if reflection(for: now) != nil { return false }
-        let dismissedKey = "AnayHub.reflectionDismissed.\(Self.weekKey(for: now))"
+        let dismissedKey = "Nudge.reflectionDismissed.\(Self.weekKey(for: now))"
         return !UserDefaults.standard.bool(forKey: dismissedKey)
     }
     func dismissReflectionPromptForThisWeek() {
-        let key = "AnayHub.reflectionDismissed.\(Self.weekKey(for: Date()))"
+        let key = "Nudge.reflectionDismissed.\(Self.weekKey(for: Date()))"
         UserDefaults.standard.set(true, forKey: key)
     }
 
@@ -315,7 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// with a text-field accessory view.
     func showDailyIntentionPrompt() {
         let alert = NSAlert()
-        alert.messageText = "What's the one thing you want to accomplish today, Anay?"
+        alert.messageText = "What's the one thing you want to accomplish today, \(userName)?"
         alert.informativeText = "It'll show up at the top of Today until you finish it (or skip it tomorrow)."
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
         field.placeholderString = "e.g. Finish chapter 7 problems"
@@ -345,7 +399,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func showWeeklyReflectionPrompt() {
         let alert = NSAlert()
         alert.messageText = "How did this week feel?"
-        alert.informativeText = "Pick a mood, drop a one-line note. Future-Anay will thank you."
+        alert.informativeText = "Pick a mood, drop a one-line note. Future-\(userName) will thank you."
         let container = NSStackView()
         container.orientation = .vertical
         container.alignment = .leading
@@ -460,6 +514,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Custom instructions floating panel — built lazily on first show.
     var instructionsPanel: NSPanel?
 
+    /// First-launch onboarding panel.
+    var onboardingPanel: NSPanel?
+
     enum ExpandedSection { case today, schedule, week, todo, backlog, more }
 
     // MARK: - Todos
@@ -498,7 +555,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     var todos: [TodoItem] = []
-    static let todosKey = "AnayHub.todos"
+    static let todosKey = "Nudge.todos"
     var todoInputField: NSTextField?
     var todoDescField: NSTextField?
     var todoSelectedPriority: Int = 4
@@ -538,7 +595,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // One-line notes attached to a specific block on a specific day.
 
     var blockNotes: [String: [String: String]] = [:]
-    static let blockNotesKey = "AnayHub.blockNotes"
+    static let blockNotesKey = "Nudge.blockNotes"
 
     func loadBlockNotes() {
         if let data = UserDefaults.standard.data(forKey: Self.blockNotesKey),
@@ -577,7 +634,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // dateKey ("yyyy-MM-dd") → set of block keys
 
     var doneState: [String: Set<String>] = [:]
-    static let doneStateKey = "AnayHub.doneState"
+    static let doneStateKey = "Nudge.doneState"
 
     func loadDoneState() {
         guard let data = UserDefaults.standard.data(forKey: Self.doneStateKey),
@@ -685,19 +742,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Hour/minute the daily water schedule anchors to (07:10 by default).
     static let waterAnchorHour = 7
     static let waterAnchorMinute = 10
-    private static let nextWaterReminderKey = "AnayHub.nextWaterReminderAt"
-    private static let waterRemindersFiredDayKey = "AnayHub.waterRemindersFiredDay" // yyyy-MM-dd
-    private static let waterRemindersFiredCountKey = "AnayHub.waterRemindersFiredCount"
+    private static let nextWaterReminderKey = "Nudge.nextWaterReminderAt"
+    private static let waterRemindersFiredDayKey = "Nudge.waterRemindersFiredDay" // yyyy-MM-dd
+    private static let waterRemindersFiredCountKey = "Nudge.waterRemindersFiredCount"
 
     /// Tracks which block index we've already fired the "2 min left" warning
     /// for, so it doesn't repeat every second.
     var endingSoonWarnedIndex: Int? = nil
 
     // Remove-from-screen state
-    private static let hideUsesKey = "AnayHub.hideUses"   // [yyyy-MM-dd: Int]
-    private static let maxHidesPerDay = 3
-    private static let hideDurationSeconds: TimeInterval = 15 * 60
-    private var hideTimer: Timer?
     private var isHiddenFromScreen: Bool = false
 
     // Constants
@@ -708,26 +761,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - App lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Single-instance guard: if another AnayHub is already running, exit.
+        // Single-instance guard: if another Nudge is already running, exit.
         let me = ProcessInfo.processInfo.processIdentifier
-        let myBundleID = Bundle.main.bundleIdentifier ?? "com.anayhub.app"
+        let myBundleID = Bundle.main.bundleIdentifier ?? "com.nudge.app"
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: myBundleID)
             .filter { $0.processIdentifier != me }
         if !others.isEmpty {
-            NSLog("AnayHub: another instance already running, exiting.")
+            NSLog("Nudge: another instance already running, exiting.")
             exit(0)
         }
 
         // No dock, no menu bar, never steal focus.
         NSApp.setActivationPolicy(.prohibited)
 
+        loadUserSettings()
+
+        // If onboarding hasn't been completed, show the onboarding panel first.
+        if !hasCompletedOnboarding {
+            showOnboarding()
+            return
+        }
+
+        finishLaunching()
+    }
+
+    /// Called after onboarding completes (or immediately if already onboarded).
+    /// Sets up the main HUD, timers, observers, etc.
+    func finishLaunching() {
         loadDoneState()
         loadTodos()
         loadBlockNotes()
         loadDailyIntentions()
         loadWeeklyReflections()
         loadBacklog()
-        loadWaterReminderState()
+        if waterRemindersEnabled { loadWaterReminderState() }
         buildPanel()
         layoutSubviews()
         wireUpInteractions()
@@ -776,19 +843,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                        name: NSWorkspace.screensDidWakeNotification,
                        object: nil)
 
+        // Sparkle auto-updater — checks for updates automatically.
+        updaterController = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: nil,
+            userDriverDelegate: nil
+        )
+
         // Auto-relaunch via launchd (first launch only)
         installLaunchdAgentIfNeeded()
 
-        // Notifications — for block-change alerts when AnayHub is hidden or
+        // Notifications — for block-change alerts when Nudge is hidden or
         // you're on a fullscreen app. The first call shows the system prompt.
         requestNotificationPermissionIfNeeded()
-        // Note: Accessibility used to be requested here so the global
-        // Right ⌘+B / Right ⌘+D hotkeys could fire while another app was
-        // focused. We dropped that requirement — the hotkeys still work IF
-        // the user has manually granted Accessibility, but we never prompt
-        // for it because the nag was annoying and the features are non-
-        // essential (Hide auto-restores after 15 min; marking done is one
-        // click on the panel).
 
         // Global Right-Command + B → bring panel back from hidden state.
         registerGlobalUnhideHotkey()
@@ -846,6 +913,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Layout (minimized panel)
 
     private func layoutSubviews() {
+        if minimizedViewMode == "todos" {
+            layoutTodosMinimized()
+            return
+        }
+        layoutScheduleMinimized()
+    }
+
+    func layoutScheduleMinimized() {
         // Clock — 11pt muted white, right-aligned
         clockLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         clockLabel.textColor = NSColor.white.withAlphaComponent(0.7)
@@ -877,10 +952,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         progressFill.layer?.cornerRadius = 1.5
         progressBar.addSubview(progressFill)
 
-        // Pill buttons — primary "Mark done", secondary "Previous", tertiary "Hide"
+        // Pill buttons — primary "Mark done", secondary "Previous"
         stylePillPrimary(markDoneButton, title: "Mark done")
         stylePillSecondary(markPrevDoneButton, title: "Mark previous done")
-        stylePillSecondary(hideButton, title: hideButtonTitle())
+
+        // Traffic-light dots — quit (red) and hide (yellow)
+        styleTrafficDot(quitButton, color: NSColor.systemRed.withAlphaComponent(0.85))
+        styleTrafficDot(hideButton, color: NSColor.systemYellow.withAlphaComponent(0.85))
 
         // Expand button (chevron) — top-left of the title strip
         expandButton.bezelStyle = .inline
@@ -933,7 +1011,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let divider3 = makeDivider()
 
         // "now" stack (header + task + countdown + progress + pill buttons)
-        let buttonsStack = NSStackView(views: [markDoneButton, markPrevDoneButton, hideButton])
+        let buttonsStack = NSStackView(views: [markDoneButton, markPrevDoneButton])
         buttonsStack.orientation = .vertical
         buttonsStack.alignment = .leading
         buttonsStack.spacing = 4
@@ -980,6 +1058,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         minRoot.addSubview(mainStack)
         minRoot.addSubview(dragHandle)
         minRoot.addSubview(expandButton)
+        minRoot.addSubview(quitButton)
+        minRoot.addSubview(hideButton)
 
         contentView.addSubview(minRoot)
         minimizedContentRoot = minRoot
@@ -999,13 +1079,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dragHandle.topAnchor.constraint(equalTo: minRoot.topAnchor),
             dragHandle.leadingAnchor.constraint(equalTo: minRoot.leadingAnchor),
             dragHandle.trailingAnchor.constraint(equalTo: minRoot.trailingAnchor),
-            dragHandle.heightAnchor.constraint(equalToConstant: 22),
+            dragHandle.bottomAnchor.constraint(equalTo: minRoot.bottomAnchor),
 
             // Expand button — top-left of the panel
             expandButton.leadingAnchor.constraint(equalTo: minRoot.leadingAnchor, constant: 8),
             expandButton.topAnchor.constraint(equalTo: minRoot.topAnchor, constant: 6),
             expandButton.widthAnchor.constraint(equalToConstant: 16),
             expandButton.heightAnchor.constraint(equalToConstant: 16),
+
+            // Traffic-light dots — next to expand button
+            quitButton.leadingAnchor.constraint(equalTo: expandButton.trailingAnchor, constant: 6),
+            quitButton.centerYAnchor.constraint(equalTo: expandButton.centerYAnchor),
+            hideButton.leadingAnchor.constraint(equalTo: quitButton.trailingAnchor, constant: 4),
+            hideButton.centerYAnchor.constraint(equalTo: expandButton.centerYAnchor),
 
             clockLabel.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor, constant: 11),
             clockLabel.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor, constant: -11),
@@ -1027,7 +1113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Wire hit-test references
         contentView.dragHandle = dragHandle
-        contentView.interactiveViews = [expandButton, markDoneButton, markPrevDoneButton, hideButton]
+        contentView.interactiveViews = [expandButton, markDoneButton, markPrevDoneButton, hideButton, quitButton]
         minimizedMainStack = mainStack
 
         // Initial size — will be refined by resizeMinimizedPanelToFit() after
@@ -1058,6 +1144,350 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         v.translatesAutoresizingMaskIntoConstraints = false
         v.heightAnchor.constraint(equalToConstant: 1).isActive = true
         return v
+    }
+
+    // MARK: - Todos minimized layout
+
+    func layoutTodosMinimized() {
+        // Clock — same style as schedule mode
+        clockLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        clockLabel.textColor = NSColor.white.withAlphaComponent(0.7)
+        clockLabel.alignment = .right
+
+        // Greeting
+        todosMiniGreeting.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        todosMiniGreeting.textColor = .white
+        todosMiniGreeting.lineBreakMode = .byTruncatingTail
+
+        // Traffic-light dots (shared with schedule mode — already styled)
+        styleTrafficDot(quitButton, color: NSColor.systemRed.withAlphaComponent(0.85))
+        styleTrafficDot(hideButton, color: NSColor.systemYellow.withAlphaComponent(0.85))
+
+        // Expand button
+        expandButton.bezelStyle = .inline
+        expandButton.isBordered = false
+        expandButton.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        expandButton.contentTintColor = NSColor.white.withAlphaComponent(0.55)
+        expandButton.attributedTitle = NSAttributedString(
+            string: "⤢",
+            attributes: [
+                .foregroundColor: NSColor.white.withAlphaComponent(0.55),
+                .font: NSFont.systemFont(ofSize: 13, weight: .medium)
+            ])
+        expandButton.translatesAutoresizingMaskIntoConstraints = false
+
+        // Progress summary for todos
+        progressSummary.font = NSFont.systemFont(ofSize: 9, weight: .regular)
+        progressSummary.textColor = NSColor.white.withAlphaComponent(0.5)
+
+        // Quick Add To-Do button
+        quickAddBtn.title = "+ Quick Add To-Do"
+        quickAddBtn.bezelStyle = .inline
+        quickAddBtn.isBordered = false
+        quickAddBtn.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        quickAddBtn.contentTintColor = NSColor.white.withAlphaComponent(0.55)
+        quickAddBtn.target = self
+        quickAddBtn.action = #selector(quickAddButtonTapped(_:))
+
+        // Motivational quote
+        dreamsQuoteLabel.stringValue = "\"The future belongs to those who believe in the beauty of their dreams.\""
+        dreamsQuoteLabel.font = NSFont.systemFont(ofSize: 8, weight: .regular)
+        dreamsQuoteLabel.textColor = NSColor.white.withAlphaComponent(0.42)
+        dreamsQuoteLabel.lineBreakMode = .byWordWrapping
+        dreamsQuoteLabel.maximumNumberOfLines = 3
+        dreamsQuoteLabel.alignment = .center
+        dreamsQuoteLabel.preferredMaxLayoutWidth = panelWidth - 28
+
+        // Drag handle
+        dragHandle = DragHandleView()
+        dragHandle.translatesAutoresizingMaskIntoConstraints = false
+
+        let divider1 = makeDivider()
+        let divider2 = makeDivider()
+
+        // Todos list container — will be populated by updateTodosMiniList()
+        let todosContainer = NSStackView()
+        todosContainer.orientation = .vertical
+        todosContainer.alignment = .leading
+        todosContainer.spacing = 4
+        todosMiniContainer = todosContainer
+
+        let mainStack = NSStackView(views: [
+            clockLabel,
+            divider1,
+            todosMiniGreeting,
+            todosContainer,
+            quickAddBtn,
+            progressSummary,
+            divider2,
+            dreamsQuoteLabel
+        ])
+        mainStack.orientation = .vertical
+        mainStack.alignment = .leading
+        mainStack.spacing = 6
+        mainStack.edgeInsets = NSEdgeInsets(top: 9, left: 11, bottom: 9, right: 11)
+        mainStack.translatesAutoresizingMaskIntoConstraints = false
+
+        let minRoot = NSView()
+        minRoot.translatesAutoresizingMaskIntoConstraints = false
+        minRoot.addSubview(mainStack)
+        minRoot.addSubview(dragHandle)
+        minRoot.addSubview(expandButton)
+        minRoot.addSubview(quitButton)
+        minRoot.addSubview(hideButton)
+
+        contentView.addSubview(minRoot)
+        minimizedContentRoot = minRoot
+
+        NSLayoutConstraint.activate([
+            minRoot.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            minRoot.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            minRoot.topAnchor.constraint(equalTo: contentView.topAnchor),
+            minRoot.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+
+            mainStack.leadingAnchor.constraint(equalTo: minRoot.leadingAnchor),
+            mainStack.trailingAnchor.constraint(equalTo: minRoot.trailingAnchor),
+            mainStack.topAnchor.constraint(equalTo: minRoot.topAnchor),
+            mainStack.bottomAnchor.constraint(equalTo: minRoot.bottomAnchor),
+
+            dragHandle.topAnchor.constraint(equalTo: minRoot.topAnchor),
+            dragHandle.leadingAnchor.constraint(equalTo: minRoot.leadingAnchor),
+            dragHandle.trailingAnchor.constraint(equalTo: minRoot.trailingAnchor),
+            dragHandle.bottomAnchor.constraint(equalTo: minRoot.bottomAnchor),
+
+            expandButton.leadingAnchor.constraint(equalTo: minRoot.leadingAnchor, constant: 8),
+            expandButton.topAnchor.constraint(equalTo: minRoot.topAnchor, constant: 6),
+            expandButton.widthAnchor.constraint(equalToConstant: 16),
+            expandButton.heightAnchor.constraint(equalToConstant: 16),
+
+            // Traffic-light dots — next to expand button
+            quitButton.leadingAnchor.constraint(equalTo: expandButton.trailingAnchor, constant: 6),
+            quitButton.centerYAnchor.constraint(equalTo: expandButton.centerYAnchor),
+            hideButton.leadingAnchor.constraint(equalTo: quitButton.trailingAnchor, constant: 4),
+            hideButton.centerYAnchor.constraint(equalTo: expandButton.centerYAnchor),
+
+            clockLabel.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor, constant: 11),
+            clockLabel.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor, constant: -11),
+
+            divider1.widthAnchor.constraint(equalToConstant: panelWidth - 22),
+            divider2.widthAnchor.constraint(equalToConstant: panelWidth - 22),
+            dreamsQuoteLabel.widthAnchor.constraint(equalToConstant: panelWidth - 28),
+        ])
+
+        contentView.dragHandle = dragHandle
+        contentView.interactiveViews = [expandButton, hideButton, quitButton, quickAddBtn]
+        minimizedMainStack = mainStack
+
+        resizeMinimizedPanelToFit()
+    }
+
+    /// Refresh the todo rows in the minimized todos view. Called from tick().
+    func updateTodosMiniList() {
+        guard minimizedViewMode == "todos", let container = todosMiniContainer else { return }
+
+        // Don't rebuild while the user is typing in quick-add
+        if isQuickAddActive { return }
+
+        // Clear old rows
+        for sub in container.arrangedSubviews { sub.removeFromSuperview() }
+
+        // ── Detail view ──
+        if let detailId = miniDetailTodoId,
+           let todo = todos.first(where: { $0.id == detailId }) {
+            // Hide everything except the container and clock
+            if let stack = minimizedMainStack {
+                for v in stack.arrangedSubviews where v !== container && v !== clockLabel {
+                    v.isHidden = true
+                }
+            }
+
+            // Back arrow
+            let backBtn = NSButton(title: "← Back", target: self, action: #selector(todoMiniBackTapped(_:)))
+            backBtn.bezelStyle = .inline
+            backBtn.isBordered = false
+            backBtn.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+            backBtn.contentTintColor = NSColor.white.withAlphaComponent(0.6)
+            container.addArrangedSubview(backBtn)
+
+            // Title
+            let title = NSTextField(labelWithString: todo.text)
+            title.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+            title.textColor = .white
+            title.lineBreakMode = .byWordWrapping
+            title.maximumNumberOfLines = 2
+            title.preferredMaxLayoutWidth = panelWidth - 28
+            container.addArrangedSubview(title)
+
+            // Priority
+            let priorityNames = [1: "Urgent", 2: "High", 3: "Medium", 4: "None"]
+            let priorityColors: [Int: NSColor] = [1: .systemRed, 2: .systemOrange, 3: .systemBlue, 4: NSColor.white.withAlphaComponent(0.4)]
+            let priLabel = NSTextField(labelWithString: "Priority: \(priorityNames[todo.priority] ?? "None")")
+            priLabel.font = NSFont.systemFont(ofSize: 9, weight: .medium)
+            priLabel.textColor = priorityColors[todo.priority] ?? NSColor.white.withAlphaComponent(0.4)
+            container.addArrangedSubview(priLabel)
+
+            // Description
+            if !todo.desc.isEmpty {
+                let desc = NSTextField(labelWithString: todo.desc)
+                desc.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+                desc.textColor = NSColor.white.withAlphaComponent(0.7)
+                desc.lineBreakMode = .byWordWrapping
+                desc.maximumNumberOfLines = 5
+                desc.preferredMaxLayoutWidth = panelWidth - 28
+                container.addArrangedSubview(desc)
+            }
+
+            // Due date
+            if let due = todo.dueDate {
+                let f = DateFormatter()
+                f.dateFormat = "d MMM yyyy"
+                let dueLabel = NSTextField(labelWithString: "Due: \(f.string(from: due))")
+                dueLabel.font = NSFont.systemFont(ofSize: 9, weight: .medium)
+                dueLabel.textColor = NSColor.white.withAlphaComponent(0.5)
+                container.addArrangedSubview(dueLabel)
+            }
+
+            contentView.interactiveViews = [expandButton, hideButton, quitButton, backBtn]
+            resizeMinimizedPanelToFit()
+            return
+        }
+
+        // ── List view (normal) ──
+        // Restore hidden views
+        if let stack = minimizedMainStack {
+            for v in stack.arrangedSubviews { v.isHidden = false }
+        }
+
+        // Update greeting
+        let h = Calendar.current.component(.hour, from: Date())
+        switch h {
+        case 5..<12:  todosMiniGreeting.stringValue = "Good morning, \(userName)."
+        case 12..<17: todosMiniGreeting.stringValue = "Hey \(userName) — keep going."
+        case 17..<21: todosMiniGreeting.stringValue = "Good evening, \(userName)."
+        default:      todosMiniGreeting.stringValue = "Late night, \(userName)?"
+        }
+
+        let incomplete = todos.prefix(5)
+        if incomplete.isEmpty {
+            let empty = NSTextField(labelWithString: "No tasks — enjoy the calm ✨")
+            empty.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+            empty.textColor = NSColor.white.withAlphaComponent(0.45)
+            container.addArrangedSubview(empty)
+        } else {
+            for todo in incomplete {
+                let row = makeTodoMiniRow(todo)
+                container.addArrangedSubview(row)
+            }
+        }
+
+        // Update summary
+        let total = todos.count
+        let doneToday = todosCompletedTodayCount()
+        progressSummary.stringValue = "\(doneToday) done today · \(total) remaining"
+
+        // Re-register interactive views
+        var interactives: [NSView] = [expandButton, hideButton, quitButton, quickAddBtn]
+        for sub in container.arrangedSubviews {
+            for child in sub.subviews {
+                if child is NSButton { interactives.append(child) }
+            }
+        }
+        contentView.interactiveViews = interactives
+
+        resizeMinimizedPanelToFit()
+    }
+
+    private func makeTodoMiniRow(_ todo: TodoItem) -> NSView {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 5
+
+        // Priority dot
+        let dot = NSView()
+        dot.wantsLayer = true
+        let dotColor: NSColor
+        switch todo.priority {
+        case 1: dotColor = NSColor.systemRed
+        case 2: dotColor = NSColor.systemOrange
+        case 3: dotColor = NSColor.systemBlue
+        default: dotColor = NSColor.white.withAlphaComponent(0.25)
+        }
+        dot.layer?.backgroundColor = dotColor.cgColor
+        dot.layer?.cornerRadius = 3
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        dot.widthAnchor.constraint(equalToConstant: 6).isActive = true
+        dot.heightAnchor.constraint(equalToConstant: 6).isActive = true
+
+        // Checkbox button
+        let check = NSButton(title: "○", target: self, action: #selector(todoMiniCheckTapped(_:)))
+        check.bezelStyle = .inline
+        check.isBordered = false
+        check.font = NSFont.systemFont(ofSize: 12, weight: .regular)
+        check.contentTintColor = NSColor.white.withAlphaComponent(0.5)
+        check.identifier = NSUserInterfaceItemIdentifier(todo.id)
+        check.translatesAutoresizingMaskIntoConstraints = false
+        check.widthAnchor.constraint(equalToConstant: 16).isActive = true
+
+        // Tap-to-detail button (the text label itself)
+        let detailBtn = NSButton(title: todo.text, target: self, action: #selector(todoMiniDetailTapped(_:)))
+        detailBtn.bezelStyle = .inline
+        detailBtn.isBordered = false
+        detailBtn.alignment = .left
+        detailBtn.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        detailBtn.contentTintColor = NSColor.white.withAlphaComponent(0.85)
+        detailBtn.lineBreakMode = .byTruncatingTail
+        detailBtn.identifier = NSUserInterfaceItemIdentifier(todo.id)
+
+        row.addArrangedSubview(dot)
+        row.addArrangedSubview(check)
+        row.addArrangedSubview(detailBtn)
+
+        return row
+    }
+
+    @objc func todoMiniCheckTapped(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue else { return }
+        // If we're viewing this todo's detail, go back to list
+        if miniDetailTodoId == id { miniDetailTodoId = nil }
+        todos.removeAll { $0.id == id }
+        saveTodos()
+        incrementTodosCompletedToday()
+        updateTodosMiniList()
+        // Also refresh expanded view if it's open
+        if isExpanded { rebuildExpandedMain() }
+    }
+
+    @objc func todoMiniDetailTapped(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue else { return }
+        miniDetailTodoId = id
+        updateTodosMiniList()
+    }
+
+    @objc func todoMiniBackTapped(_ sender: NSButton) {
+        miniDetailTodoId = nil
+        updateTodosMiniList()
+    }
+
+    // MARK: - Traffic-light dot styling
+
+    private func styleTrafficDot(_ btn: NSButton, color: NSColor) {
+        btn.bezelStyle = .inline
+        btn.isBordered = false
+        btn.title = ""
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        // Use an image-based approach: draw a filled circle into the button
+        let size: CGFloat = 12
+        let img = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            color.setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            return true
+        }
+        btn.image = img
+        btn.imagePosition = .imageOnly
+        btn.imageScaling = .scaleNone
+        btn.widthAnchor.constraint(equalToConstant: size).isActive = true
+        btn.heightAnchor.constraint(equalToConstant: size).isActive = true
     }
 
     // MARK: - Pill button styling
@@ -1109,6 +1539,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         markPrevDoneButton.action = #selector(markPrevDoneTapped(_:))
         hideButton.target = self
         hideButton.action = #selector(hideFromScreenTapped(_:))
+        quitButton.target = self
+        quitButton.action = #selector(quitFromMinimizedTapped(_:))
         expandButton.target = self
         expandButton.action = #selector(toggleExpanded(_:))
 
@@ -1134,12 +1566,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let now = Date()
         clockLabel.stringValue = "\(dateF.string(from: now))  ·  \(timeF.string(from: now))"
 
+        // In todos mode, refresh the mini todo list; schedule-mode updates below.
+        if minimizedViewMode == "todos" && !isExpanded {
+            updateTodosMiniList()
+        }
+
         recomputeCurrentBlock()
         updateBlockUI()
         updateUrgencyState()
 
         // 20-20-20: count real lid-open seconds (not during sleep / active break)
-        if !screensAsleep && !isInEyeBreak && !isInWaterBreak {
+        if eyeBreakEnabled && !screensAsleep && !isInEyeBreak && !isInWaterBreak {
             laptopOpenSeconds += 1
             if laptopOpenSeconds >= Self.eyeBreakIntervalSeconds {
                 laptopOpenSeconds = 0
@@ -1150,7 +1587,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Water reminder — wall-clock anchored, NOT lid-open seconds. Fires
         // when we cross the next scheduled time. Re-check every tick so a
         // missed reminder (laptop was closed) pops the moment we're back.
-        if !isInWaterBreak && !isInEyeBreak && !screensAsleep && now >= nextWaterReminderAt {
+        if waterRemindersEnabled && !isInWaterBreak && !isInEyeBreak && !screensAsleep && now >= nextWaterReminderAt {
             triggerWaterReminder()
         }
         // Live-update the countdown label on the Progress dashboard if visible.
@@ -1203,12 +1640,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func postEndingSoonNotification(for block: ScheduleBlock) {
         let content = UNMutableNotificationContent()
         content.title = "⏳ 2 minutes left"
-        content.body = "\(formatBlock(block)) is wrapping up. Bring it home, Anay."
+        content.body = "\(formatBlock(block)) is wrapping up. Bring it home, \(userName)."
         content.sound = .default
         let req = UNNotificationRequest(identifier: "ending-soon-\(Date().timeIntervalSince1970)",
                                         content: content,
                                         trigger: nil)
-        UNUserNotificationCenter.current().add(req)
+        notificationCenter?.add(req)
     }
 
     /// Briefly pulse the HUD border in cyan to draw the eye.
@@ -1556,7 +1993,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func postWaterReminderNotification() {
         let isRefillTime = ((waterRemindersFired + 1) % 2 == 0)
         let content = UNMutableNotificationContent()
-        content.title = "💧 Drink water, Anay"
+        content.title = "💧 Drink water, \(userName)"
         content.body = isRefillTime
             ? "Drink the other half of your bottle — then refill."
             : "Drink half of your bottle of water."
@@ -1564,7 +2001,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let req = UNNotificationRequest(identifier: "water-\(Date().timeIntervalSince1970)",
                                         content: content,
                                         trigger: nil)
-        UNUserNotificationCenter.current().add(req)
+        notificationCenter?.add(req)
     }
 
     // MARK: - Screen sleep / wake (lid proxy)
@@ -1609,11 +2046,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func updateBlockUI() {
         guard let idx = currentBlockIndex else {
-            currentTaskLabel.stringValue = "—"
-            countdownLabel.stringValue = ""
+            let now = Date()
+            let nextBlock = todayBlocks.first(where: { $0.start > now })
+            let hasRealBlocks = todayBlocks.contains { isCompletable($0) }
+
+            if let next = nextBlock {
+                // In a gap — there's a block coming up
+                currentTaskLabel.stringValue = "Nothing to do right now. Woohoo!"
+                let remaining = max(0, next.start.timeIntervalSince(now))
+                let mins = Int(ceil(remaining / 60.0))
+                countdownLabel.stringValue = "Next up in \(formatRemaining(mins))"
+                nextTaskLabel.stringValue = formatBlock(next)
+            } else if hasRealBlocks {
+                // Past all blocks for today
+                currentTaskLabel.stringValue = "You're done for the day!"
+                countdownLabel.stringValue = ""
+                nextTaskLabel.stringValue = "Enjoy the rest of your evening ✨"
+            } else {
+                currentTaskLabel.stringValue = "No tasks right now"
+                countdownLabel.stringValue = "Set up your schedule to get started."
+                nextTaskLabel.stringValue = "Enjoy the calm ✨"
+            }
             progressFill.frame = .zero
-            nextTaskLabel.stringValue = formatBlock(todayBlocks.first)
-            updateProgressDots(completed: 0)
+            let completable = todayBlocks.filter { isCompletable($0) }
+            let doneCount = completable.filter { isDone($0) }.count
+            updateProgressDots(completed: max(0, todayBlocks.count - 1))
+            progressSummary.stringValue = "\(doneCount) of \(completable.count) blocks done"
             markDoneButton.isHidden = true
             markPrevDoneButton.isHidden = true
             return
@@ -1781,56 +2239,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Remove from screen (hide / unhide)
 
-    private func hideUsesToday() -> Int {
-        let stored = UserDefaults.standard.dictionary(forKey: Self.hideUsesKey) as? [String: Int] ?? [:]
-        return stored[todayKey()] ?? 0
-    }
-
-    private func recordHideUse() {
-        var stored = UserDefaults.standard.dictionary(forKey: Self.hideUsesKey) as? [String: Int] ?? [:]
-        let key = todayKey()
-        stored[key] = (stored[key] ?? 0) + 1
-        UserDefaults.standard.set(stored, forKey: Self.hideUsesKey)
-    }
-
-    func hideButtonTitle() -> String {
-        let remaining = max(0, Self.maxHidesPerDay - hideUsesToday())
-        return "Hide (\(remaining) left)"
-    }
-
-    private func refreshHideButton() {
-        let remaining = max(0, Self.maxHidesPerDay - hideUsesToday())
-        if remaining == 0 {
-            hideButton.isHidden = true
-        } else {
-            hideButton.isHidden = false
-            stylePillSecondary(hideButton, title: hideButtonTitle())
-        }
-        resizeMinimizedPanelToFit()
-    }
-
     @objc func hideFromScreenTapped(_ sender: NSButton) {
-        guard hideUsesToday() < Self.maxHidesPerDay else { return }
-        recordHideUse()
         isHiddenFromScreen = true
         panel.orderOut(nil)
-
-        // Auto-restore after the max hide window so the panel never silently
-        // disappears for the rest of the day.
-        hideTimer?.invalidate()
-        hideTimer = Timer.scheduledTimer(withTimeInterval: Self.hideDurationSeconds,
-                                         repeats: false) { [weak self] _ in
-            Task { @MainActor in self?.unhideFromScreen() }
-        }
     }
 
     func unhideFromScreen() {
         guard isHiddenFromScreen else { return }
         isHiddenFromScreen = false
-        hideTimer?.invalidate()
-        hideTimer = nil
         panel.orderFrontRegardless()
-        refreshHideButton()
+    }
+
+    @objc func quitFromMinimizedTapped(_ sender: NSButton) {
+        performCompleteQuit()
     }
 
     // MARK: - Urgency / border pulse
@@ -1900,7 +2321,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             lastDayCheck = today
             todayBlocks = todaysSchedule()
             recomputeCurrentBlock(force: true)
-            refreshHideButton()  // hide allowance resets per calendar day
             sweepBacklogForOverdueDays()
             tick()
         }
@@ -2172,6 +2592,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Corner snapping
 
     func snapToNearestCorner() {
+        if snapToCornerDisabled { return }
         let screen = screenContainingActiveApp()
         // In ambient (fullscreen) mode the menu bar / Dock are hidden so the
         // true edges are screen.frame; otherwise use visibleFrame.
@@ -2523,19 +2944,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - launchd auto-relaunch
     //
     // To uninstall manually:
-    //   launchctl unload ~/Library/LaunchAgents/com.anayhub.launcher.plist
-    //   rm ~/Library/LaunchAgents/com.anayhub.launcher.plist
+    //   launchctl unload ~/Library/LaunchAgents/com.nudge.launcher.plist
+    //   rm ~/Library/LaunchAgents/com.nudge.launcher.plist
 
     private var launchAgentURL: URL {
         let lib = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first!
-        return lib.appendingPathComponent("LaunchAgents/com.anayhub.launcher.plist")
+        return lib.appendingPathComponent("LaunchAgents/com.nudge.launcher.plist")
     }
 
     private func installLaunchdAgentIfNeeded() {
         let dest = launchAgentURL
         if FileManager.default.fileExists(atPath: dest.path) { return }
 
-        guard let bundled = Bundle.main.url(forResource: "com.anayhub.launcher", withExtension: "plist") else {
+        guard let bundled = Bundle.main.url(forResource: "com.nudge.launcher", withExtension: "plist") else {
             return
         }
 
@@ -2552,27 +2973,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             task.arguments = ["load", dest.path]
             try? task.run()
         } catch {
-            NSLog("AnayHub: failed to install launch agent: \(error)")
+            NSLog("Nudge: failed to install launch agent: \(error)")
         }
     }
 
     // MARK: - Permissions
 
     private func requestNotificationPermissionIfNeeded() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        notificationCenter?.requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
+
+    /// Lazily cached notification center — created once so repeated
+    /// `.current()` calls don't hit the assertion that ad-hoc signed
+    /// apps sometimes trip.
+    private lazy var notificationCenter: UNUserNotificationCenter? = {
+        guard Bundle.main.bundleIdentifier != nil else { return nil }
+        return UNUserNotificationCenter.current()
+    }()
 
     /// System notification for the eye-break — used as a backup when the
     /// panel was hidden so the message isn't easy to miss.
     func postEyeBreakNotification() {
         let content = UNMutableNotificationContent()
         content.title = "👀 20-20-20 break"
-        content.body = "Look out the window for 20 seconds, Anay."
+        content.body = "Look out the window for 20 seconds, \(userName)."
         content.sound = .default
         let req = UNNotificationRequest(identifier: "eye-break-\(Date().timeIntervalSince1970)",
                                         content: content,
                                         trigger: nil)
-        UNUserNotificationCenter.current().add(req)
+        notificationCenter?.add(req)
     }
 
     /// Fire a system notification when the current block changes. Skipped on
@@ -2587,7 +3016,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let req = UNNotificationRequest(identifier: UUID().uuidString,
                                         content: content,
                                         trigger: nil)
-        UNUserNotificationCenter.current().add(req)
+        notificationCenter?.add(req)
         playGentleChime()
     }
 
@@ -2622,15 +3051,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Global hotkey: Right Command + B
 
     private func registerGlobalUnhideHotkey() {
-        // Global monitor — fires while AnayHub is in the background.
+        // Silently check accessibility trust — do not prompt on every launch.
+        // The onboarding flow and Settings page handle prompting the user.
+        let _ = AXIsProcessTrusted()
+
+        // Global monitor — fires while Nudge is in the background.
         NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if Self.isRightCommandB(event) {
                 Task { @MainActor in self?.unhideFromScreen() }
             } else if Self.isRightCommandD(event) {
                 Task { @MainActor in self?.markCurrentBlockDoneViaHotkey() }
+            // } else if Self.isControlOptionN(event) {
+            //     Task { @MainActor in self?.triggerQuickAdd() }
             }
         }
-        // Local monitor — covers the rare case AnayHub itself has focus.
+        // Local monitor — covers the rare case Nudge itself has focus.
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if Self.isRightCommandB(event) {
                 Task { @MainActor in self?.unhideFromScreen() }
@@ -2638,6 +3073,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             if Self.isRightCommandD(event) {
                 Task { @MainActor in self?.markCurrentBlockDoneViaHotkey() }
+                return nil
+            }
+            // if Self.isControlOptionN(event) {
+            //     Task { @MainActor in self?.triggerQuickAdd() }
+            //     return nil
+            // }
+            // Escape dismisses quick-add
+            if event.keyCode == 53, self?.isQuickAddActive == true {
+                Task { @MainActor in self?.dismissQuickAdd() }
                 return nil
             }
             return event
@@ -2660,6 +3104,113 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             && event.keyCode == dKeyCode
     }
 
+    // MARK: - Quick-add (⌃⌥N global hotkey — commented out, kept for future use)
+    /*
+    private static func isControlOptionN(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let nKeyCode: UInt16 = 45
+        return flags.contains(.control) && flags.contains(.option)
+            && !flags.contains(.command) && !flags.contains(.shift)
+            && event.keyCode == nKeyCode
+    }
+
+    func triggerQuickAdd() {
+        if isHiddenFromScreen { unhideFromScreen() }
+        if isExpanded { collapsePanel() }
+        panel.orderFrontRegardless()
+        isQuickAddActive = true
+        showQuickAddField()
+    }
+    */
+
+    /// Show inline quick-add field in the todos minimized view.
+    @objc func quickAddButtonTapped(_ sender: Any?) {
+        guard minimizedViewMode == "todos" else { return }
+        isQuickAddActive = true
+
+        // Promote to .regular so typing works
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        panel.orderFrontRegardless()
+
+        if let stack = minimizedMainStack {
+            for v in stack.arrangedSubviews where v !== clockLabel {
+                v.isHidden = true
+            }
+        }
+        if let tc = todosMiniContainer {
+            tc.isHidden = false
+            for sub in tc.arrangedSubviews { sub.removeFromSuperview() }
+
+            let prompt = NSTextField(labelWithString: "Quick add a reminder:")
+            prompt.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+            prompt.textColor = NSColor.white.withAlphaComponent(0.6)
+            tc.addArrangedSubview(prompt)
+
+            let field = NSTextField()
+            field.placeholderString = "Type and press Enter..."
+            field.font = NSFont.systemFont(ofSize: 12, weight: .regular)
+            field.textColor = .white
+            field.backgroundColor = NSColor.white.withAlphaComponent(0.1)
+            field.isBordered = false
+            field.isBezeled = false
+            field.focusRingType = .none
+            field.wantsLayer = true
+            field.layer?.cornerRadius = 5
+            field.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
+            field.translatesAutoresizingMaskIntoConstraints = false
+            field.widthAnchor.constraint(equalToConstant: panelWidth - 30).isActive = true
+            field.heightAnchor.constraint(equalToConstant: 24).isActive = true
+            field.target = self
+            field.action = #selector(quickAddFieldSubmitted(_:))
+            quickAddField = field
+            tc.addArrangedSubview(field)
+
+            let hint = NSTextField(labelWithString: "Press Esc to cancel")
+            hint.font = NSFont.systemFont(ofSize: 8, weight: .regular)
+            hint.textColor = NSColor.white.withAlphaComponent(0.3)
+            tc.addArrangedSubview(hint)
+        }
+
+        resizeMinimizedPanelToFit()
+
+        panel.allowsKey = true
+        panel.makeKeyAndOrderFront(nil)
+        if let field = quickAddField {
+            panel.makeFirstResponder(field)
+        }
+    }
+
+    @objc func quickAddFieldSubmitted(_ sender: NSTextField) {
+        let text = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty {
+            let todo = TodoItem(text: text)
+            todos.insert(todo, at: 0)
+            saveTodos()
+        }
+        dismissQuickAdd()
+    }
+
+    func dismissQuickAdd() {
+        // Resign first responder before tearing down views
+        panel.makeFirstResponder(nil)
+
+        isQuickAddActive = false
+        quickAddField = nil
+
+        // Restore hidden views
+        if let stack = minimizedMainStack {
+            for v in stack.arrangedSubviews { v.isHidden = false }
+        }
+        updateTodosMiniList()
+
+        // Demote back to accessory (not prohibited — that can terminate the app)
+        DispatchQueue.main.async {
+            NSApp.setActivationPolicy(.accessory)
+        }
+
+        if isExpanded { rebuildExpandedMain() }
+    }
 
     /// Mark the currently-active block done via the global hotkey.
     /// Skips Break / Sleep blocks (no-op).

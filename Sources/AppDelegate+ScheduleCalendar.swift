@@ -1,11 +1,11 @@
 //
 //  AppDelegate+ScheduleCalendar.swift
-//  AnayHub
+//  Nudge
 //
 //  Calendar-style Schedule view. Replaces the old day-pill approach.
 //
 //  Layout (top → bottom):
-//    1. Header — "Your week, Anay." + week range subtitle
+//    1. Header — "Your week, \(userName)." + week range subtitle
 //       Edit + 📅 Pick Week + Today buttons on the right
 //    2. Week strip — chevron < | Mon Tue Wed Thu Fri Sat Sun | chevron >
 //       Each day shows the day name + the date number; today is tinted
@@ -23,7 +23,7 @@ extension AppDelegate {
 
     func buildScheduleView() -> NSView {
         // ── Header
-        let header = NSTextField(labelWithString: "Your week, Anay.")
+        let header = NSTextField(labelWithString: "Your week, \(userName).")
         header.font = NSFont.systemFont(ofSize: 20, weight: .heavy)
         header.textColor = Theme.primary
 
@@ -294,6 +294,32 @@ extension AppDelegate {
         let dayTitle = NSTextField(labelWithString: f.string(from: day))
         dayTitle.font = NSFont.systemFont(ofSize: 14, weight: .heavy)
         dayTitle.textColor = Theme.primary
+
+        let hasRealBlocks = blocks.contains { $0.name != "Sleep" && $0.name != "Break" }
+
+        if !hasRealBlocks {
+            let emptyMsg = NSTextField(labelWithString: "Nothing added for this day.")
+            emptyMsg.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+            emptyMsg.textColor = Theme.tertiary
+            emptyMsg.translatesAutoresizingMaskIntoConstraints = false
+            let emptyHint = NSTextField(labelWithString: "Tap Edit to set up your schedule.")
+            emptyHint.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+            emptyHint.textColor = Theme.muted
+            emptyHint.translatesAutoresizingMaskIntoConstraints = false
+            let emptyStack = NSStackView(views: [dayTitle, emptyMsg, emptyHint])
+            emptyStack.orientation = .vertical
+            emptyStack.alignment = .leading
+            emptyStack.spacing = 8
+            emptyStack.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(emptyStack)
+            NSLayoutConstraint.activate([
+                emptyStack.topAnchor.constraint(equalTo: container.topAnchor),
+                emptyStack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                emptyStack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor),
+                container.heightAnchor.constraint(greaterThanOrEqualToConstant: 80),
+            ])
+            return
+        }
 
         let countLabel = NSTextField(labelWithString: "\(completable.count) tasks")
         countLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)

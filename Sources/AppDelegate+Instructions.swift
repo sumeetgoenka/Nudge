@@ -1,9 +1,9 @@
 //
 //  AppDelegate+Instructions.swift
-//  AnayHub
+//  Nudge
 //
 //  A custom floating instructions panel — replaces the old NSAlert which
-//  kept appearing behind other windows because AnayHub is a non-activating
+//  kept appearing behind other windows because Nudge is a non-activating
 //  agent app. This panel sits at statusWindow+2 level so it floats above
 //  every other window, joins all spaces, and never steals focus from your
 //  current app.
@@ -85,11 +85,11 @@ extension AppDelegate {
 
     private func buildInstructionsContent() -> NSView {
         // Header
-        let title = NSTextField(labelWithString: "How to use AnayHub")
+        let title = NSTextField(labelWithString: "How to use Nudge")
         title.font = NSFont.systemFont(ofSize: 22, weight: .heavy)
         title.textColor = .white
 
-        let subtitle = NSTextField(labelWithString: "Quick reference, Anay")
+        let subtitle = NSTextField(labelWithString: "Quick reference, \(userName)")
         subtitle.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         subtitle.textColor = NSColor.white.withAlphaComponent(0.55)
 
@@ -108,8 +108,8 @@ extension AppDelegate {
                 ("R⌘ + D", "Mark current done (needs Accessibility, optional)"),
             ]),
             ("🛑", "QUITTING", [
-                ("More tab", "Sidebar → More → Quit AnayHub"),
-                ("Effect", "Stops AnayHub + prevents auto-restart"),
+                ("More tab", "Sidebar → More → Quit Nudge"),
+                ("Effect", "Stops Nudge + prevents auto-restart"),
             ]),
             ("📌", "BASICS", [
                 ("⤢", "Expand the panel (top-left of HUD)"),

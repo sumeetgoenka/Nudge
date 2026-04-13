@@ -1,6 +1,6 @@
 //
 //  AppDelegate+Progress.swift
-//  AnayHub
+//  Nudge
 //
 //  Computes the ProgressStats snapshot from doneState + ScheduleStore, and
 //  builds the Progress dashboard view (replaces the old "Week" section).
@@ -216,7 +216,7 @@ extension AppDelegate {
     func buildProgressView() -> NSView {
         let stats = computeProgressStats()
 
-        let header = NSTextField(labelWithString: "Look at you, Anay.")
+        let header = NSTextField(labelWithString: "Look at you, \(userName).")
         header.font = NSFont.systemFont(ofSize: 20, weight: .heavy)
         header.textColor = Theme.primary
 
@@ -249,10 +249,10 @@ extension AppDelegate {
         streakRow.spacing = 10
         streakRow.distribution = .fillEqually
 
-        // 20-20-20 eye-break countdown
-        let eyeCard = makeEyeBreakCard()
-        // Water reminder countdown
-        let waterCard = makeWaterReminderCard()
+        // 20-20-20 eye-break countdown (only if enabled)
+        let eyeCard: NSView? = eyeBreakEnabled ? makeEyeBreakCard() : nil
+        // Water reminder countdown (only if enabled)
+        let waterCard: NSView? = waterRemindersEnabled ? makeWaterReminderCard() : nil
 
         // This week — bars
         let weekCard = makeWeekBarsCard(stats.thisWeek)
@@ -276,37 +276,33 @@ extension AppDelegate {
         quote.alignment = .center
 
         // Master scroll content
-        let content = NSStackView(views: [headerStack, hero, streakRow, eyeCard, waterCard, weekCard, dayOfWeekCard, recordsCard, allTimeCard, quote])
+        var contentViews: [NSView] = [headerStack, hero, streakRow]
+        if let eyeCard = eyeCard { contentViews.append(eyeCard) }
+        if let waterCard = waterCard { contentViews.append(waterCard) }
+        contentViews.append(contentsOf: [weekCard, dayOfWeekCard, recordsCard, allTimeCard, quote])
+
+        let content = NSStackView(views: contentViews)
         content.orientation = .vertical
         content.alignment = .leading
         content.spacing = 14
         content.translatesAutoresizingMaskIntoConstraints = false
-        for v in [hero, streakRow, eyeCard, waterCard, weekCard, dayOfWeekCard, recordsCard, allTimeCard, quote] {
+
+        var fullWidthViews: [NSView] = [hero, streakRow]
+        if let eyeCard = eyeCard { fullWidthViews.append(eyeCard) }
+        if let waterCard = waterCard { fullWidthViews.append(waterCard) }
+        fullWidthViews.append(contentsOf: [weekCard, dayOfWeekCard, recordsCard, allTimeCard, quote])
+        for v in fullWidthViews {
             v.translatesAutoresizingMaskIntoConstraints = false
         }
 
         let scroll = makeScroll(content: content)
 
-        NSLayoutConstraint.activate([
-            hero.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            hero.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            streakRow.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            streakRow.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            eyeCard.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            eyeCard.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            waterCard.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            waterCard.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            weekCard.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            weekCard.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            dayOfWeekCard.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            dayOfWeekCard.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            recordsCard.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            recordsCard.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            allTimeCard.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            allTimeCard.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            quote.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            quote.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-        ])
+        var constraints: [NSLayoutConstraint] = []
+        for v in fullWidthViews {
+            constraints.append(v.leadingAnchor.constraint(equalTo: content.leadingAnchor))
+            constraints.append(v.trailingAnchor.constraint(equalTo: content.trailingAnchor))
+        }
+        NSLayoutConstraint.activate(constraints)
 
         return scroll
     }
