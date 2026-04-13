@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AnayHub launchd agent.
+
+  This file is bundled inside the app at Contents/Resources/com.anayhub.launcher.plist.
+  On first launch, AnayHub copies it to ~/Library/LaunchAgents/com.anayhub.launcher.plist
+  with {{BINARY_PATH}} replaced by the actual app binary path, then loads it via:
+      launchctl load ~/Library/LaunchAgents/com.anayhub.launcher.plist
+
+  KeepAlive = true ensures launchd relaunches the app immediately if it is force quit
+  or crashes.
+
+  TO UNINSTALL MANUALLY:
+      launchctl unload ~/Library/LaunchAgents/com.anayhub.launcher.plist
+      rm ~/Library/LaunchAgents/com.anayhub.launcher.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.anayhub.launcher</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{BINARY_PATH}}</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+</dict>
+</plist>
