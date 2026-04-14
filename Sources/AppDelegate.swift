@@ -835,6 +835,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel = HUDPanel(contentRect: initialRect)
         panel.minSize = NSSize(width: 0, height: 0)
         panel.contentMinSize = NSSize(width: 0, height: 0)
+        if let close = panel.standardWindowButton(.closeButton) {
+            close.target = self
+            close.action = #selector(hideFromTitlebar(_:))
+        }
+        if let mini = panel.standardWindowButton(.miniaturizeButton) {
+            mini.target = self
+            mini.action = #selector(hideFromTitlebar(_:))
+        }
 
         // Visual effect background (frosted dark HUD).
         // Light Mood swaps the material to a softer translucent style while
@@ -1035,9 +1043,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dragHandle.trailingAnchor.constraint(equalTo: minRoot.trailingAnchor),
             dragHandle.bottomAnchor.constraint(equalTo: minRoot.bottomAnchor),
 
-            // Expand button — top-left of the panel
-            expandButton.leadingAnchor.constraint(equalTo: minRoot.leadingAnchor, constant: 8),
-            expandButton.topAnchor.constraint(equalTo: minRoot.topAnchor, constant: 6),
+            // Expand button — bottom-right of the panel (traffic lights occupy top-left)
+            expandButton.trailingAnchor.constraint(equalTo: minRoot.trailingAnchor, constant: -8),
+            expandButton.bottomAnchor.constraint(equalTo: minRoot.bottomAnchor, constant: -6),
             expandButton.widthAnchor.constraint(equalToConstant: 16),
             expandButton.heightAnchor.constraint(equalToConstant: 16),
 
@@ -1197,8 +1205,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dragHandle.trailingAnchor.constraint(equalTo: minRoot.trailingAnchor),
             dragHandle.bottomAnchor.constraint(equalTo: minRoot.bottomAnchor),
 
-            expandButton.leadingAnchor.constraint(equalTo: minRoot.leadingAnchor, constant: 8),
-            expandButton.topAnchor.constraint(equalTo: minRoot.topAnchor, constant: 6),
+            expandButton.trailingAnchor.constraint(equalTo: minRoot.trailingAnchor, constant: -8),
+            expandButton.bottomAnchor.constraint(equalTo: minRoot.bottomAnchor, constant: -6),
             expandButton.widthAnchor.constraint(equalToConstant: 16),
             expandButton.heightAnchor.constraint(equalToConstant: 16),
 

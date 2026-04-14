@@ -35,7 +35,7 @@ extension AppDelegate {
         // Switch the panel into a standard titled/resizable app window with
         // Apple's traffic lights. We hijack the close + miniaturize buttons
         // so they collapse back to the floating HUD instead of closing.
-        panel.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        panel.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         panel.title = "Nudge"
         panel.titlebarAppearsTransparent = true
         panel.titleVisibility = .hidden
@@ -110,8 +110,18 @@ extension AppDelegate {
         todoInputField = nil
         todoDescField = nil
 
-        // Restore the borderless floating HUD style.
-        panel.styleMask = [.borderless, .nonactivatingPanel]
+        // Restore the floating HUD style with Apple traffic lights.
+        panel.styleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView, .nonactivatingPanel]
+        panel.titlebarAppearsTransparent = true
+        panel.titleVisibility = .hidden
+        if let close = panel.standardWindowButton(.closeButton) {
+            close.target = self
+            close.action = #selector(hideFromTitlebar(_:))
+        }
+        if let mini = panel.standardWindowButton(.miniaturizeButton) {
+            mini.target = self
+            mini.action = #selector(hideFromTitlebar(_:))
+        }
         panel.level = NSWindow.Level(Int(CGWindowLevelForKey(.statusWindow)) + 1)
         panel.collectionBehavior = [.canJoinAllSpaces,
                                     .fullScreenAuxiliary,
@@ -274,7 +284,7 @@ extension AppDelegate {
             dragStrip.bottomAnchor.constraint(equalTo: root.bottomAnchor),
 
             titleRow.topAnchor.constraint(equalTo: root.topAnchor, constant: 14),
-            titleRow.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
+            titleRow.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 78),
             titleRow.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16),
             titleRow.heightAnchor.constraint(equalToConstant: 40),
 

@@ -64,9 +64,11 @@ final class HUDPanel: NSPanel {
 
     init(contentRect: NSRect) {
         super.init(contentRect: contentRect,
-                   styleMask: [.borderless, .nonactivatingPanel],
+                   styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView, .nonactivatingPanel],
                    backing: .buffered,
                    defer: false)
+        self.titlebarAppearsTransparent = true
+        self.titleVisibility = .hidden
         self.isFloatingPanel = true
         self.hidesOnDeactivate = false
         self.becomesKeyOnlyIfNeeded = true
