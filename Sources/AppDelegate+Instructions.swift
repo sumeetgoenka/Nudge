@@ -108,8 +108,7 @@ extension AppDelegate {
                 ("R⌘ + D", "Mark current done (needs Accessibility, optional)"),
             ]),
             ("🛑", "QUITTING", [
-                ("More tab", "Sidebar → More → Quit Nudge"),
-                ("Effect", "Stops Nudge + prevents auto-restart"),
+                ("⌘ + Q", "Quits Nudge"),
             ]),
             ("📌", "BASICS", [
                 ("⤢", "Expand the panel (top-left of HUD)"),
@@ -167,8 +166,6 @@ extension AppDelegate {
                 ("Time-of-day", "Block accent color shifts by part of day"),
             ]),
             ("✨", "DAILY & WEEKLY", [
-                ("Intention prompt", "First expand of the day asks for 1 thing"),
-                ("Today banner", "Your intention pinned at the top of Today"),
                 ("Sunday 19:00", "End-of-week mood + one-line reflection"),
             ]),
             ("🌗", "AMBIENT & THEME", [

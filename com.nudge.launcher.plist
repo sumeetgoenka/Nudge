@@ -7,8 +7,8 @@
   with {{BINARY_PATH}} replaced by the actual app binary path, then loads it via:
       launchctl load ~/Library/LaunchAgents/com.nudge.launcher.plist
 
-  KeepAlive = true ensures launchd relaunches the app immediately if it is force quit
-  or crashes.
+  RunAtLoad=true launches Nudge at login. KeepAlive is intentionally off so the
+  user can Cmd+Q to quit during the session without launchd immediately respawning.
 
   TO UNINSTALL MANUALLY:
       launchctl unload ~/Library/LaunchAgents/com.nudge.launcher.plist
@@ -29,7 +29,7 @@
     <true/>
 
     <key>KeepAlive</key>
-    <true/>
+    <false/>
 
     <key>ProcessType</key>
     <string>Interactive</string>

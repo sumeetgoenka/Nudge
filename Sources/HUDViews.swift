@@ -99,11 +99,7 @@ final class ClickToFocusTextField: NSTextField {
         if let panel = window as? HUDPanel {
             panel.allowsKey = true
         }
-        // 2. Temporarily promote to .regular so macOS routes keyboard
-        //    events to this LSUIElement app, then activate.
-        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        // 3. Make the window key.
         window?.makeKeyAndOrderFront(nil)
         // 4. Start the field editor via super FIRST — this creates the
         //    NSTextView that actually handles typing.
@@ -125,8 +121,6 @@ final class ClickToFocusTextField: NSTextField {
 
     override func textDidEndEditing(_ notification: Notification) {
         super.textDidEndEditing(notification)
-        // Demote back to accessory so the dock icon disappears.
-        NSApp.setActivationPolicy(.accessory)
     }
 }
 

@@ -45,8 +45,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let progressFill     = NSView()
     let markDoneButton     = PillButton()
     let markPrevDoneButton = PillButton()
-    let hideButton         = NSButton(title: "", target: nil, action: nil)
-    let quitButton         = NSButton(title: "", target: nil, action: nil)
     let expandButton       = NSButton(title: "⤢", target: nil, action: nil)
     let nextHeaderLabel    = NSTextField(labelWithString: "NEXT")
     let nextTaskLabel      = NSTextField(labelWithString: "")
@@ -267,48 +265,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         saveBacklog()
     }
 
-    // MARK: - Daily intention
-    // dateKey ("yyyy-MM-dd") → "the one thing you want to accomplish"
-
-    var dailyIntentions: [String: String] = [:]
-    static let dailyIntentionsKey = "Nudge.dailyIntentions"
-
-    func loadDailyIntentions() {
-        if let data = UserDefaults.standard.data(forKey: Self.dailyIntentionsKey),
-           let decoded = try? JSONDecoder().decode([String: String].self, from: data) {
-            dailyIntentions = decoded
-        }
-    }
-    func saveDailyIntentions() {
-        if let data = try? JSONEncoder().encode(dailyIntentions) {
-            UserDefaults.standard.set(data, forKey: Self.dailyIntentionsKey)
-        }
-    }
-    func intentionForToday() -> String? {
-        let v = dailyIntentions[todayKey()]
-        return (v?.isEmpty == false) ? v : nil
-    }
-    func setIntentionForToday(_ text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let key = todayKey()
-        if trimmed.isEmpty {
-            dailyIntentions.removeValue(forKey: key)
-        } else {
-            dailyIntentions[key] = trimmed
-        }
-        saveDailyIntentions()
-    }
-    /// True if the user has neither set nor explicitly skipped an intention for today.
-    func shouldPromptForDailyIntention() -> Bool {
-        if intentionForToday() != nil { return false }
-        let dismissedKey = "Nudge.intentionDismissed.\(todayKey())"
-        return !UserDefaults.standard.bool(forKey: dismissedKey)
-    }
-    func dismissIntentionPromptForToday() {
-        let key = "Nudge.intentionDismissed.\(todayKey())"
-        UserDefaults.standard.set(true, forKey: key)
-    }
-
     // MARK: - Weekly reflection journal
     // weekKey ("yyyy-Www" e.g. "2026-W14") → (mood emoji, note)
 
@@ -363,36 +319,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func dismissReflectionPromptForThisWeek() {
         let key = "Nudge.reflectionDismissed.\(Self.weekKey(for: Date()))"
         UserDefaults.standard.set(true, forKey: key)
-    }
-
-    /// Modal prompt asking the user to set today's intention. Uses NSAlert
-    /// with a text-field accessory view.
-    func showDailyIntentionPrompt() {
-        let alert = NSAlert()
-        alert.messageText = "What's the one thing you want to accomplish today, \(userName)?"
-        alert.informativeText = "It'll show up at the top of Today until you finish it (or skip it tomorrow)."
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
-        field.placeholderString = "e.g. Finish chapter 7 problems"
-        field.stringValue = intentionForToday() ?? ""
-        alert.accessoryView = field
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Skip today")
-        if let win = alert.window as? NSPanel {
-            win.level = NSWindow.Level(Int(CGWindowLevelForKey(.statusWindow)) + 3)
-        }
-        panel.allowsKey = true
-        panel.makeKeyAndOrderFront(nil)
-        let resp = alert.runModal()
-        panel.allowsKey = false
-
-        switch resp {
-        case .alertFirstButtonReturn:
-            setIntentionForToday(field.stringValue)
-        case .alertSecondButtonReturn:
-            dismissIntentionPromptForToday()
-        default: break
-        }
-        rebuildExpandedMain()
     }
 
     /// Modal prompt for the Sunday-evening weekly reflection.
@@ -760,6 +686,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - App lifecycle
 
+    /// Build a minimal app menu so standard shortcuts (Cmd+Q, Cmd+H, Cmd+W) work.
+    func installMainMenu() {
+        let mainMenu = NSMenu()
+        let appItem = NSMenuItem()
+        mainMenu.addItem(appItem)
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Hide Nudge", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthers = appMenu.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(withTitle: "Quit Nudge", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+
+        let winItem = NSMenuItem()
+        mainMenu.addItem(winItem)
+        let winMenu = NSMenu(title: "Window")
+        winMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        winMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        winItem.submenu = winMenu
+
+        NSApp.mainMenu = mainMenu
+    }
+
+    /// Clicking the dock icon when the window is hidden brings it back.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            panel.orderFrontRegardless()
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        return true
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Single-instance guard: if another Nudge is already running, exit.
         let me = ProcessInfo.processInfo.processIdentifier
@@ -771,8 +730,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             exit(0)
         }
 
-        // No dock, no menu bar, never steal focus.
-        NSApp.setActivationPolicy(.prohibited)
+        // Standalone app — dock icon always present.
+        NSApp.setActivationPolicy(.regular)
+        installMainMenu()
 
         loadUserSettings()
 
@@ -791,7 +751,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         loadDoneState()
         loadTodos()
         loadBlockNotes()
-        loadDailyIntentions()
         loadWeeklyReflections()
         loadBacklog()
         if waterRemindersEnabled { loadWaterReminderState() }
@@ -850,8 +809,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             userDriverDelegate: nil
         )
 
-        // Auto-relaunch via launchd (first launch only)
-        installLaunchdAgentIfNeeded()
+        // One-time cleanup: if a previous version installed a launchd agent,
+        // unload and remove it so Nudge is no longer managed by launchd.
+        uninstallLaunchdAgentIfPresent()
 
         // Notifications — for block-change alerts when Nudge is hidden or
         // you're on a fullscreen app. The first call shows the system prompt.
@@ -956,10 +916,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stylePillPrimary(markDoneButton, title: "Mark done")
         stylePillSecondary(markPrevDoneButton, title: "Mark previous done")
 
-        // Traffic-light dots — quit (red) and hide (yellow)
-        styleTrafficDot(quitButton, color: NSColor.systemRed.withAlphaComponent(0.85))
-        styleTrafficDot(hideButton, color: NSColor.systemYellow.withAlphaComponent(0.85))
-
         // Expand button (chevron) — top-left of the title strip
         expandButton.bezelStyle = .inline
         expandButton.isBordered = false
@@ -1058,8 +1014,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         minRoot.addSubview(mainStack)
         minRoot.addSubview(dragHandle)
         minRoot.addSubview(expandButton)
-        minRoot.addSubview(quitButton)
-        minRoot.addSubview(hideButton)
 
         contentView.addSubview(minRoot)
         minimizedContentRoot = minRoot
@@ -1087,12 +1041,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             expandButton.widthAnchor.constraint(equalToConstant: 16),
             expandButton.heightAnchor.constraint(equalToConstant: 16),
 
-            // Traffic-light dots — next to expand button
-            quitButton.leadingAnchor.constraint(equalTo: expandButton.trailingAnchor, constant: 6),
-            quitButton.centerYAnchor.constraint(equalTo: expandButton.centerYAnchor),
-            hideButton.leadingAnchor.constraint(equalTo: quitButton.trailingAnchor, constant: 4),
-            hideButton.centerYAnchor.constraint(equalTo: expandButton.centerYAnchor),
-
             clockLabel.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor, constant: 11),
             clockLabel.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor, constant: -11),
 
@@ -1113,7 +1061,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Wire hit-test references
         contentView.dragHandle = dragHandle
-        contentView.interactiveViews = [expandButton, markDoneButton, markPrevDoneButton, hideButton, quitButton]
+        contentView.interactiveViews = [expandButton, markDoneButton, markPrevDoneButton]
         minimizedMainStack = mainStack
 
         // Initial size — will be refined by resizeMinimizedPanelToFit() after
@@ -1158,10 +1106,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         todosMiniGreeting.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         todosMiniGreeting.textColor = .white
         todosMiniGreeting.lineBreakMode = .byTruncatingTail
-
-        // Traffic-light dots (shared with schedule mode — already styled)
-        styleTrafficDot(quitButton, color: NSColor.systemRed.withAlphaComponent(0.85))
-        styleTrafficDot(hideButton, color: NSColor.systemYellow.withAlphaComponent(0.85))
 
         // Expand button
         expandButton.bezelStyle = .inline
@@ -1233,8 +1177,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         minRoot.addSubview(mainStack)
         minRoot.addSubview(dragHandle)
         minRoot.addSubview(expandButton)
-        minRoot.addSubview(quitButton)
-        minRoot.addSubview(hideButton)
 
         contentView.addSubview(minRoot)
         minimizedContentRoot = minRoot
@@ -1260,12 +1202,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             expandButton.widthAnchor.constraint(equalToConstant: 16),
             expandButton.heightAnchor.constraint(equalToConstant: 16),
 
-            // Traffic-light dots — next to expand button
-            quitButton.leadingAnchor.constraint(equalTo: expandButton.trailingAnchor, constant: 6),
-            quitButton.centerYAnchor.constraint(equalTo: expandButton.centerYAnchor),
-            hideButton.leadingAnchor.constraint(equalTo: quitButton.trailingAnchor, constant: 4),
-            hideButton.centerYAnchor.constraint(equalTo: expandButton.centerYAnchor),
-
             clockLabel.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor, constant: 11),
             clockLabel.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor, constant: -11),
 
@@ -1275,7 +1211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])
 
         contentView.dragHandle = dragHandle
-        contentView.interactiveViews = [expandButton, hideButton, quitButton, quickAddBtn]
+        contentView.interactiveViews = [expandButton, quickAddBtn]
         minimizedMainStack = mainStack
 
         resizeMinimizedPanelToFit()
@@ -1347,7 +1283,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 container.addArrangedSubview(dueLabel)
             }
 
-            contentView.interactiveViews = [expandButton, hideButton, quitButton, backBtn]
+            contentView.interactiveViews = [expandButton, backBtn]
             resizeMinimizedPanelToFit()
             return
         }
@@ -1386,7 +1322,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         progressSummary.stringValue = "\(doneToday) done today · \(total) remaining"
 
         // Re-register interactive views
-        var interactives: [NSView] = [expandButton, hideButton, quitButton, quickAddBtn]
+        var interactives: [NSView] = [expandButton, quickAddBtn]
         for sub in container.arrangedSubviews {
             for child in sub.subviews {
                 if child is NSButton { interactives.append(child) }
@@ -1537,10 +1473,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         markDoneButton.action = #selector(markDoneTapped(_:))
         markPrevDoneButton.target = self
         markPrevDoneButton.action = #selector(markPrevDoneTapped(_:))
-        hideButton.target = self
-        hideButton.action = #selector(hideFromScreenTapped(_:))
-        quitButton.target = self
-        quitButton.action = #selector(quitFromMinimizedTapped(_:))
         expandButton.target = self
         expandButton.action = #selector(toggleExpanded(_:))
 
@@ -2239,19 +2171,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Remove from screen (hide / unhide)
 
-    @objc func hideFromScreenTapped(_ sender: NSButton) {
-        isHiddenFromScreen = true
-        panel.orderOut(nil)
-    }
-
     func unhideFromScreen() {
         guard isHiddenFromScreen else { return }
         isHiddenFromScreen = false
         panel.orderFrontRegardless()
-    }
-
-    @objc func quitFromMinimizedTapped(_ sender: NSButton) {
-        performCompleteQuit()
     }
 
     // MARK: - Urgency / border pulse
@@ -2703,7 +2626,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func completeQuit() {
-        unloadLaunchdAgent()
         NSApp.terminate(nil)
     }
 
@@ -2941,40 +2863,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: - launchd auto-relaunch
+    // MARK: - Legacy launchd cleanup
     //
-    // To uninstall manually:
-    //   launchctl unload ~/Library/LaunchAgents/com.nudge.launcher.plist
-    //   rm ~/Library/LaunchAgents/com.nudge.launcher.plist
+    // Earlier versions of Nudge installed a launchd agent at
+    // ~/Library/LaunchAgents/com.nudge.launcher.plist so the app would
+    // auto-restart. That behavior has been removed — this function tears
+    // down any leftover agent from prior installs.
 
     private var launchAgentURL: URL {
         let lib = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first!
         return lib.appendingPathComponent("LaunchAgents/com.nudge.launcher.plist")
     }
 
-    private func installLaunchdAgentIfNeeded() {
+    private func uninstallLaunchdAgentIfPresent() {
         let dest = launchAgentURL
-        if FileManager.default.fileExists(atPath: dest.path) { return }
+        guard FileManager.default.fileExists(atPath: dest.path) else { return }
 
-        guard let bundled = Bundle.main.url(forResource: "com.nudge.launcher", withExtension: "plist") else {
-            return
-        }
+        let unload = Process()
+        unload.launchPath = "/bin/launchctl"
+        unload.arguments = ["unload", dest.path]
+        try? unload.run()
+        unload.waitUntilExit()
 
-        do {
-            try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(),
-                                                    withIntermediateDirectories: true)
-            var content = try String(contentsOf: bundled, encoding: .utf8)
-            let exePath = Bundle.main.executablePath ?? ""
-            content = content.replacingOccurrences(of: "{{BINARY_PATH}}", with: exePath)
-            try content.write(to: dest, atomically: true, encoding: .utf8)
-
-            let task = Process()
-            task.launchPath = "/bin/launchctl"
-            task.arguments = ["load", dest.path]
-            try? task.run()
-        } catch {
-            NSLog("Nudge: failed to install launch agent: \(error)")
-        }
+        try? FileManager.default.removeItem(at: dest)
     }
 
     // MARK: - Permissions
@@ -3128,8 +3039,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard minimizedViewMode == "todos" else { return }
         isQuickAddActive = true
 
-        // Promote to .regular so typing works
-        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         panel.orderFrontRegardless()
 
@@ -3204,11 +3113,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         updateTodosMiniList()
 
-        // Demote back to accessory (not prohibited — that can terminate the app)
-        DispatchQueue.main.async {
-            NSApp.setActivationPolicy(.accessory)
-        }
-
         if isExpanded { rebuildExpandedMain() }
     }
 
@@ -3224,28 +3128,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func unloadLaunchdAgent() {
-        unloadLaunchdAgentPublic()
-    }
-
-    /// Same as unloadLaunchdAgent but reachable from extensions in other files.
-    func unloadLaunchdAgentPublic() {
-        let dest = launchAgentURL
-        guard FileManager.default.fileExists(atPath: dest.path) else { return }
-        let task = Process()
-        task.launchPath = "/bin/launchctl"
-        task.arguments = ["unload", dest.path]
-        try? task.run()
-        task.waitUntilExit()
-    }
-
-    /// Removes the launchd plist file from disk so launchd has nothing to
-    /// reload at next login. The complete-quit path uses this; the legacy
-    /// quit gesture leaves the plist alone in case it was an accidental quit.
-    func deleteLaunchdAgentFile() {
-        let dest = launchAgentURL
-        if FileManager.default.fileExists(atPath: dest.path) {
-            try? FileManager.default.removeItem(at: dest)
-        }
-    }
 }

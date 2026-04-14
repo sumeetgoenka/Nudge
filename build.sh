@@ -12,7 +12,8 @@ cd "$(dirname "$0")"
 
 APP_NAME="Nudge"
 APP_DIR="build/${APP_NAME}.app"
-CONTENTS="${APP_DIR}/Contents"
+STAGING_DIR="build/staging"
+CONTENTS="${STAGING_DIR}/Contents"
 MACOS_DIR="${CONTENTS}/MacOS"
 RES_DIR="${CONTENTS}/Resources"
 FRAMEWORKS_DIR="${CONTENTS}/Frameworks"
@@ -51,18 +52,38 @@ swiftc \
 echo "→ Copying Info.plist..."
 cp Info.plist "${CONTENTS}/Info.plist"
 
-echo "→ Copying launchd template..."
-cp com.nudge.launcher.plist "${RES_DIR}/com.nudge.launcher.plist"
-
 echo "→ Copying app icon..."
 cp AppIcon.icns "${RES_DIR}/AppIcon.icns"
 
 echo "→ Embedding Sparkle framework..."
 cp -a Sparkle/Sparkle.framework "${FRAMEWORKS_DIR}/"
 
-echo "→ Ad-hoc codesigning..."
-codesign --force --deep --sign - "${FRAMEWORKS_DIR}/Sparkle.framework" 2>/dev/null || true
-codesign --force --deep --sign - "${APP_DIR}" 2>/dev/null || true
+echo "→ Finalizing .app bundle..."
+mv "${STAGING_DIR}" "${APP_DIR}"
+
+SIGN_ID="${SIGN_ID:--}"   # default: ad-hoc. For release: SIGN_ID="Developer ID Application: Sumeet Goenka (G7CS4NV8PF)"
+
+if [[ "$SIGN_ID" == "-" ]]; then
+    echo "→ Ad-hoc codesigning..."
+    codesign --force --deep --sign - "${APP_DIR}/Contents/Frameworks/Sparkle.framework" 2>/dev/null || true
+    codesign --force --deep --sign - "${APP_DIR}" 2>/dev/null || true
+else
+    echo "→ Codesigning with Developer ID + hardened runtime..."
+    # Sign Sparkle's internal XPC helpers + framework first
+    SPARKLE_FW="${APP_DIR}/Contents/Frameworks/Sparkle.framework"
+    for xpc in "${SPARKLE_FW}/Versions/B/XPCServices"/*.xpc; do
+        [[ -d "$xpc" ]] || continue
+        codesign --force --timestamp --options runtime --sign "$SIGN_ID" "$xpc"
+    done
+    for helper in "${SPARKLE_FW}/Versions/B/Autoupdate" "${SPARKLE_FW}/Versions/B/Updater.app"; do
+        [[ -e "$helper" ]] && codesign --force --timestamp --options runtime --sign "$SIGN_ID" "$helper"
+    done
+    codesign --force --timestamp --options runtime --sign "$SIGN_ID" "$SPARKLE_FW"
+    # Sign the main app last
+    codesign --force --timestamp --options runtime \
+        --entitlements Nudge.entitlements \
+        --sign "$SIGN_ID" "${APP_DIR}"
+fi
 
 echo "✓ Built ${APP_DIR}"
 

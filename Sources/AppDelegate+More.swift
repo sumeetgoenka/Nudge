@@ -16,7 +16,7 @@ extension AppDelegate {
         header.font = NSFont.systemFont(ofSize: 20, weight: .heavy)
         header.textColor = Theme.primary
 
-        let subtitle = NSTextField(labelWithString: "Controls and the exit")
+        let subtitle = NSTextField(labelWithString: "Controls")
         subtitle.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         subtitle.textColor = Theme.tertiary
 
@@ -24,50 +24,6 @@ extension AppDelegate {
         headerStack.orientation = .vertical
         headerStack.alignment = .leading
         headerStack.spacing = 2
-
-        // ── Quit card ────────────────────────────────────────────────
-        let quitCard = makeMoreCard()
-        quitCard.heightAnchor.constraint(equalToConstant: 130).isActive = true
-
-        let quitTitle = NSTextField(labelWithString: "Completely quit Nudge")
-        quitTitle.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
-        quitTitle.textColor = Theme.primary
-
-        let quitBlurb = NSTextField(labelWithString: "Stops Nudge and unloads it from launchd so it won't auto-restart at next login. You can launch it again from the .app whenever you like.")
-        quitBlurb.font = NSFont.systemFont(ofSize: 11, weight: .regular)
-        quitBlurb.textColor = Theme.tertiary
-        quitBlurb.lineBreakMode = .byWordWrapping
-        quitBlurb.maximumNumberOfLines = 3
-        quitBlurb.preferredMaxLayoutWidth = 380
-
-        let quitBtn = NSButton(title: "Quit Nudge", target: self,
-                               action: #selector(moreQuitTapped(_:)))
-        quitBtn.bezelStyle = .inline
-        quitBtn.isBordered = false
-        quitBtn.wantsLayer = true
-        quitBtn.layer?.cornerRadius = 7
-        quitBtn.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.85).cgColor
-        quitBtn.attributedTitle = NSAttributedString(
-            string: "  Quit Nudge  ",
-            attributes: [
-                .foregroundColor: Theme.primary,
-                .font: NSFont.systemFont(ofSize: 12, weight: .semibold)
-            ])
-        quitBtn.translatesAutoresizingMaskIntoConstraints = false
-        quitBtn.heightAnchor.constraint(equalToConstant: 30).isActive = true
-
-        let cardStack = NSStackView(views: [quitTitle, quitBlurb, quitBtn])
-        cardStack.orientation = .vertical
-        cardStack.alignment = .leading
-        cardStack.spacing = 8
-        cardStack.translatesAutoresizingMaskIntoConstraints = false
-        quitCard.addSubview(cardStack)
-        NSLayoutConstraint.activate([
-            cardStack.topAnchor.constraint(equalTo: quitCard.topAnchor, constant: 14),
-            cardStack.leadingAnchor.constraint(equalTo: quitCard.leadingAnchor, constant: 16),
-            cardStack.trailingAnchor.constraint(equalTo: quitCard.trailingAnchor, constant: -16),
-            cardStack.bottomAnchor.constraint(lessThanOrEqualTo: quitCard.bottomAnchor, constant: -14),
-        ])
 
         // ── Light-mood toggle card ──────────────────────────────────
         let moodCard = makeMoreCard()
@@ -329,7 +285,7 @@ extension AppDelegate {
         ])
 
         // ── Master stack ─────────────────────────────────────────────
-        let main = NSStackView(views: [headerStack, modeCard, moodCard, snapCard, waterCard, eyeCard, accessCard, updateCard, quitCard])
+        let main = NSStackView(views: [headerStack, modeCard, moodCard, snapCard, waterCard, eyeCard, accessCard, updateCard])
         main.orientation = .vertical
         main.alignment = .leading
         main.spacing = 16
@@ -348,8 +304,6 @@ extension AppDelegate {
         accessCard.trailingAnchor.constraint(equalTo: main.trailingAnchor).isActive = true
         updateCard.leadingAnchor.constraint(equalTo: main.leadingAnchor).isActive = true
         updateCard.trailingAnchor.constraint(equalTo: main.trailingAnchor).isActive = true
-        quitCard.leadingAnchor.constraint(equalTo: main.leadingAnchor).isActive = true
-        quitCard.trailingAnchor.constraint(equalTo: main.trailingAnchor).isActive = true
 
         let scroll = makeScroll(content: main)
         return scroll
@@ -408,29 +362,4 @@ extension AppDelegate {
         return v
     }
 
-    @objc func moreQuitTapped(_ sender: NSButton) {
-        let alert = NSAlert()
-        alert.messageText = "Quit Nudge completely?"
-        alert.informativeText = "Nudge will stop and won't auto-restart at next login. You can launch it again from the .app whenever you like."
-        alert.addButton(withTitle: "Quit")
-        alert.addButton(withTitle: "Cancel")
-        // Make the alert appear in front of the floating panel.
-        if let alertWindow = alert.window as? NSPanel {
-            alertWindow.level = NSWindow.Level(Int(CGWindowLevelForKey(.statusWindow)) + 3)
-        }
-        let resp = alert.runModal()
-        if resp == .alertFirstButtonReturn {
-            performCompleteQuit()
-        }
-    }
-
-    /// Tear-down sequence for a clean quit:
-    ///   1. unload the launchd agent (so it doesn't restart us)
-    ///   2. delete the launchd plist file (so launchd doesn't reload it at login)
-    ///   3. terminate the app
-    func performCompleteQuit() {
-        unloadLaunchdAgentPublic()
-        deleteLaunchdAgentFile()
-        NSApp.terminate(nil)
-    }
 }

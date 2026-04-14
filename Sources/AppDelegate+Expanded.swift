@@ -32,6 +32,26 @@ extension AppDelegate {
         minimizedContentRoot?.isHidden = true
         contentView.isExpanded = true
 
+        // Switch the panel into a standard titled/resizable app window with
+        // Apple's traffic lights. We hijack the close + miniaturize buttons
+        // so they collapse back to the floating HUD instead of closing.
+        panel.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        panel.title = "Nudge"
+        panel.titlebarAppearsTransparent = true
+        panel.titleVisibility = .hidden
+        panel.isMovableByWindowBackground = false
+        panel.level = .normal
+        panel.collectionBehavior = []
+        panel.allowsKey = true
+        if let close = panel.standardWindowButton(.closeButton) {
+            close.target = self
+            close.action = #selector(hideFromTitlebar(_:))
+        }
+        if let mini = panel.standardWindowButton(.miniaturizeButton) {
+            mini.target = self
+            mini.action = #selector(collapseFromTitlebar(_:))
+        }
+
         // Lock the panel size BEFORE building content so autolayout can't
         // shrink the window when narrower sections are loaded.
         let target = Self.expandedFixedSize
@@ -48,11 +68,23 @@ extension AppDelegate {
         lastRenderedExpandedBlockIndex = currentBlockIndex
         rebuildExpandedMain()
 
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
         // Animate to the fixed expanded frame for visual smoothness.
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.2
             panel.animator().setFrame(frame, display: true)
         }
+    }
+
+    @objc func collapseFromTitlebar(_ sender: Any?) {
+        collapsePanel()
+    }
+
+    @objc func hideFromTitlebar(_ sender: Any?) {
+        collapsePanel()
+        panel.orderOut(nil)
     }
 
     func collapsePanel() {
@@ -77,8 +109,14 @@ extension AppDelegate {
         scheduleListContainer = nil
         todoInputField = nil
         todoDescField = nil
-        // Demote activation policy in case the todo field was focused.
-        NSApp.setActivationPolicy(.accessory)
+
+        // Restore the borderless floating HUD style.
+        panel.styleMask = [.borderless, .nonactivatingPanel]
+        panel.level = NSWindow.Level(Int(CGWindowLevelForKey(.statusWindow)) + 1)
+        panel.collectionBehavior = [.canJoinAllSpaces,
+                                    .fullScreenAuxiliary,
+                                    .stationary,
+                                    .ignoresCycle]
 
         // Unlock the panel size — minimized mode resizes itself.
         panel.contentMinSize = NSSize(width: 0, height: 0)
@@ -504,56 +542,6 @@ extension AppDelegate {
         scroll.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
         return stack
     }
-
-    /// A pill-style banner shown at the top of Today when the user has set
-    /// today's intention. Click "Edit" to change it.
-    func makeIntentionBanner(text: String) -> NSView {
-        let card = NSView()
-        card.wantsLayer = true
-        card.layer?.cornerRadius = 10
-        card.layer?.backgroundColor = NSColor.systemYellow.withAlphaComponent(0.18).cgColor
-        card.layer?.borderColor = NSColor.systemYellow.withAlphaComponent(0.45).cgColor
-        card.layer?.borderWidth = 1
-        card.translatesAutoresizingMaskIntoConstraints = false
-        card.heightAnchor.constraint(equalToConstant: 48).isActive = true
-
-        let star = NSTextField(labelWithString: "✨")
-        star.font = NSFont.systemFont(ofSize: 18)
-
-        let label = NSTextField(labelWithString: "Today: \(text)")
-        label.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        label.textColor = Theme.primary
-        label.lineBreakMode = .byTruncatingTail
-
-        let editBtn = NSButton(title: "Edit", target: self,
-                               action: #selector(editIntentionTapped(_:)))
-        editBtn.bezelStyle = .inline
-        editBtn.isBordered = false
-        editBtn.attributedTitle = NSAttributedString(
-            string: "Edit",
-            attributes: [
-                .foregroundColor: Theme.secondary,
-                .font: NSFont.systemFont(ofSize: 11, weight: .semibold)
-            ])
-
-        let row = NSStackView(views: [star, label, NSView(), editBtn])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 10
-        row.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(row)
-        NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
-            row.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
-            row.centerYAnchor.constraint(equalTo: card.centerYAnchor),
-        ])
-        return card
-    }
-
-    @objc func editIntentionTapped(_ sender: Any?) {
-        showDailyIntentionPrompt()
-    }
-
 
     @objc func expandedToggleDone(_ sender: NSButton) {
         let i = sender.tag
